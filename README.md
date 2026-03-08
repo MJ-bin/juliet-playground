@@ -46,25 +46,19 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -r requirement
 ### 1) 빠른 스모크 실행 (CWE-78, 3개 그룹만)
 
 ```bash
-python tools/run-infer-all-juliet.py 78 --max-cases 3 \
-  --infer-extra '--pulse-taint-sources [{"procedure":"fgets","taint_target":["ArgumentPositions",[0]]}]' \
-  --infer-extra '--pulse-taint-sinks [{"procedure":"execl","taint_target":["ArgumentPositions",[3]]}]'
+python tools/run-infer-all-juliet.py 78 --max-cases 3
 ```
 
 ### 2) CSV까지 생성
 
 ```bash
-python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-csv \
-  --infer-extra '--pulse-taint-sources [{"procedure":"fgets","taint_target":["ArgumentPositions",[0]]}]' \
-  --infer-extra '--pulse-taint-sinks [{"procedure":"execl","taint_target":["ArgumentPositions",[3]]}]'
+python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-csv
 ```
 
 ### 3) CWE 전체 실행 (시간 오래 걸릴 수 있음)
 
 ```bash
-python tools/run-infer-all-juliet.py 78 \
-  --infer-extra '--pulse-taint-sources [{"procedure":"fgets","taint_target":["ArgumentPositions",[0]]}]' \
-  --infer-extra '--pulse-taint-sinks [{"procedure":"execl","taint_target":["ArgumentPositions",[3]]}]'
+python tools/run-infer-all-juliet.py 78
 ```
 
 ## 결과 위치
@@ -81,3 +75,4 @@ python tools/run-infer-all-juliet.py 78 \
 - `.cpp` 파일은 `clang++`, `.c` 파일은 `clang`을 사용합니다.
 - 같은 번호 그룹(`_52a`, `_52b`, `_52c` 등)은 한 번만 잡고 `*_52*` 와일드카드로 함께 컴파일합니다.
 - `--max-cases`는 CWE당 실행 그룹 수를 제한해 스모크 테스트에 유용합니다.
+- Pulse taint 설정은 `tools/pulse-taint-config.json`을 고정 경로로 사용합니다.

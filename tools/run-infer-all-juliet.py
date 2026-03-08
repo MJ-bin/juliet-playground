@@ -1,11 +1,10 @@
 from typing import List, Optional
 
-from paths import PROJECT_HOME, JULIET_TESTCASE_DIR, INFER_BIN, RESULT_DIR, GLOBAL_RESULT_DIR
+from paths import PROJECT_HOME, JULIET_TESTCASE_DIR, INFER_BIN, RESULT_DIR, GLOBAL_RESULT_DIR, PULSE_TAINT_CONFIG
 
 import csv
 import datetime
 import os
-import shlex
 import subprocess
 import time
 import typer
@@ -19,8 +18,7 @@ def is_cwe_exist(cwe_number):
     return None
 
 
-def run_infer(file_path, filename_head, filename_num, extension,
-              infer_extra: List[str]):
+def run_infer(file_path, filename_head, filename_num, extension):
     num_cores = 20
     testcasesupport_dir = os.path.join(PROJECT_HOME, 'juliet-test-suite-v1.3',
                                        'C', 'testcasesupport')
@@ -34,22 +32,13 @@ def run_infer(file_path, filename_head, filename_num, extension,
     link_flag = ' -lm' if extension == 'cpp' else ''
 
     compile_cmd = f'{compiler} -I {testcasesupport_dir} -D INCLUDEMAIN {io_c} {target_file}{link_flag}'
-    infer_extra_parts = []
-    for arg in infer_extra:
-        split_once = arg.strip().split(None, 1)
-        infer_extra_parts.append(shlex.quote(split_once[0]))
-        if len(split_once) == 2:
-            infer_extra_parts.append(shlex.quote(split_once[1]))
-    infer_extra_cmd = f" {' '.join(infer_extra_parts)}" if infer_extra_parts else ''
-
     return subprocess.check_output(
-        f'{INFER_BIN} run -j {num_cores}{infer_extra_cmd} -- {compile_cmd}',
+        f'{INFER_BIN} run -j {num_cores} --pulse-taint-config {PULSE_TAINT_CONFIG} -- {compile_cmd}',
         shell=True)
 
 
 def run_infer_all(cwe_dir,
                   result_dir,
-                  infer_extra: List[str],
                   max_cases: Optional[int] = None,
                   executed_cases: Optional[List[int]] = None,
                   processed_groups: Optional[set] = None):
@@ -72,7 +61,6 @@ def run_infer_all(cwe_dir,
         if os.path.isdir(file_path):
             subdir_result = run_infer_all(file_path,
                                           result_dir,
-                                          infer_extra,
                                           max_cases=max_cases,
                                           executed_cases=executed_cases,
                                           processed_groups=processed_groups)
@@ -115,8 +103,7 @@ def run_infer_all(cwe_dir,
             os.makedirs(result_path, exist_ok=True)
             os.chdir(result_path)
             executed_cases[0] += 1
-            result = run_infer(file_path, filename_head, filename_num, extension,
-                               infer_extra)
+            result = run_infer(file_path, filename_head, filename_num, extension)
             os.chdir(result_dir)
 
             if b'No issues found' in result:
@@ -171,10 +158,11 @@ def main(cwes: List[int],
          generate_csv: bool = typer.Option(False),
          global_result: bool = typer.Option(False),
          max_cases: Optional[int] = typer.Option(
-             None, help='Maximum number of testcases to run for each CWE'),
-         infer_extra: List[str] = typer.Option(
-             [], '--infer-extra',
-             help='Additional infer options; can be passed multiple times')):
+             None, help='Maximum number of testcases to run for each CWE')):
+
+    if not os.path.exists(PULSE_TAINT_CONFIG):
+        raise typer.BadParameter(
+            f'Pulse taint config not found: {PULSE_TAINT_CONFIG}')
 
     result_dir = GLOBAL_RESULT_DIR if global_result else RESULT_DIR
     os.makedirs(result_dir, exist_ok=True)
@@ -189,7 +177,6 @@ def main(cwes: List[int],
         else:
             result_map[cwe_number] = run_infer_all(result,
                                                    juliet_result_dir,
-                                                   infer_extra,
                                                    max_cases=max_cases)
 
     if generate_csv:
