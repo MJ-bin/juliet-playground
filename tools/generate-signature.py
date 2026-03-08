@@ -23,19 +23,9 @@ def find_latest_juliet_result_dir(artifacts_dir: Path) -> Path:
     return latest
 
 
-def main(input_dir: Path = typer.Option(
-            None, '--input-dir', help='Input juliet-result-* directory'),
-         output_root: Path = typer.Option(
-            Path(RESULT_DIR) / 'signatures',
-            '--output-root',
-            help='Root directory for signatures-result-* output'),
-         taint_error_only: bool = typer.Option(
-            True,
-            '--taint-error-only/--all-issues',
-            help='Export only TAINT_ERROR alarms (default: on)')):
-    if input_dir is None:
-        input_dir = find_latest_juliet_result_dir(Path(RESULT_DIR))
-
+def generate_signatures(input_dir: Path,
+                        output_root: Path = Path(RESULT_DIR) / 'signatures'
+                        ) -> Path:
     timestamp = datetime.datetime.now().strftime('%Y.%m.%d-%H:%M:%S')
     output_dir = output_root / f'signatures-result-{timestamp}'
     os.makedirs(output_dir, exist_ok=True)
@@ -54,9 +44,6 @@ def main(input_dir: Path = typer.Option(
         cnt = 1
 
         for alarm in j:
-            if taint_error_only and alarm.get('bug_type') != 'TAINT_ERROR':
-                continue
-
             if len(alarm['bug_trace']) == 0:
                 continue
 
@@ -66,6 +53,20 @@ def main(input_dir: Path = typer.Option(
                 json.dump(alarm, fp, indent=2)
             cnt += 1
 
+    return output_dir
+
+
+def main(input_dir: Path = typer.Option(
+            None, '--input-dir', help='Input juliet-result-* directory'),
+         output_root: Path = typer.Option(
+            Path(RESULT_DIR) / 'signatures',
+            '--output-root',
+            help='Root directory for signatures-result-* output')):
+    if input_dir is None:
+        input_dir = find_latest_juliet_result_dir(Path(RESULT_DIR))
+
+    output_dir = generate_signatures(input_dir=input_dir,
+                                     output_root=output_root)
     print(f'Signatures generated at: {output_dir}')
 
 

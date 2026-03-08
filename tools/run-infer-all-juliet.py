@@ -4,7 +4,9 @@ from paths import PROJECT_HOME, JULIET_TESTCASE_DIR, INFER_BIN, RESULT_DIR, GLOB
 
 import csv
 import datetime
+import importlib.util
 import os
+from pathlib import Path
 import re
 import shlex
 import subprocess
@@ -268,8 +270,22 @@ def generate_no_issue_files(result_map, result_dir):
                 f.write('\n')
 
 
+def load_signature_module():
+    module_path = os.path.join(PROJECT_HOME, 'tools', 'generate-signature.py')
+    spec = importlib.util.spec_from_file_location('generate_signature_module',
+                                                  module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'Failed to load signature module: {module_path}')
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main(cwes: Optional[List[int]] = typer.Argument(None),
          generate_csv: bool = typer.Option(False),
+         generate_signature: bool = typer.Option(
+             False, help='Generate signatures after infer run'),
          global_result: bool = typer.Option(False),
          files: List[str] = typer.Option(
              [], '--files', help='Run infer for specific files (repeatable)'),
@@ -306,6 +322,13 @@ def main(cwes: Optional[List[int]] = typer.Argument(None),
         generate_result_csv(result_map, juliet_result_dir)
 
     generate_no_issue_files(result_map, juliet_result_dir)
+
+    if generate_signature:
+        signature_module = load_signature_module()
+        signature_output_dir = signature_module.generate_signatures(
+            input_dir=Path(juliet_result_dir),
+            output_root=Path(RESULT_DIR) / 'signatures')
+        print(f'Signatures generated at: {signature_output_dir}')
 
 
 if __name__ == '__main__':

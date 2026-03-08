@@ -11,7 +11,7 @@ Juliet C/C++ 테스트 스위트에 대해 Infer를 실험적으로 실행해보
 
 - `tools/generate-signature.py`
   - `artifacts`의 최신 `juliet-result-*`를 자동 선택해 signature JSON을 생성합니다.
-  - 기본적으로 `TAINT_ERROR`만 추출합니다.
+  - `bug_trace`가 있는 이슈를 signature로 추출합니다.
   - 결과를 `artifacts/signatures/signatures-result-*` 아래에 저장합니다.
 
 - `tools/paths.py`
@@ -75,20 +75,17 @@ python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-csv
 python tools/run-infer-all-juliet.py 78
 ```
 
-### 4) Signature 생성 (기본: 최신 결과 + TAINT_ERROR만)
+### 4) Infer 실행 후 Signature까지 한 번에 생성
 
 ```bash
-python tools/generate-signature.py
+python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-signature
 ```
 
-### 5) Signature 생성 옵션
+### 5) Signature만 별도 생성
 
 ```bash
 # 입력 결과 폴더 명시
 python tools/generate-signature.py --input-dir artifacts/juliet-result-2026.03.08-18:04:18
-
-# 모든 이슈 타입 추출(TAINT_ERROR 필터 해제)
-python tools/generate-signature.py --all-issues
 ```
 
 ## 결과 위치
