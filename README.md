@@ -49,13 +49,22 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -r requirement
 python tools/run-infer-all-juliet.py 78 --max-cases 3
 ```
 
+### 1-1) 원하는 파일 직접 실행
+
+```bash
+python tools/run-infer-all-juliet.py --files juliet-test-suite-v1.3/C/testcases/CWE78_OS_Command_Injection/s01/CWE78_OS_Command_Injection__char_console_execlp_52a.c
+```
+
+> Juliet 파일명 규칙(정규식)으로 그룹을 파싱해 같은 flow variant를 함께 실행합니다.  
+> 예: `..._81_bad.cpp`를 지정하면 `..._81a.cpp`, `..._81_goodG2B.cpp` 등 같은 `81` 그룹이 같이 컴파일됩니다.
+
 ### 2) CSV까지 생성
 
 ```bash
 python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-csv
 ```
 
-### 3) CWE 전체 실행 (시간 오래 걸릴 수 있음)
+### 3) CWE-78 전체 실행 (시간 오래 걸릴 수 있음)
 
 ```bash
 python tools/run-infer-all-juliet.py 78
@@ -73,6 +82,9 @@ python tools/run-infer-all-juliet.py 78
 ## 동작 메모
 
 - `.cpp` 파일은 `clang++`, `.c` 파일은 `clang`을 사용합니다.
-- 같은 번호 그룹(`_52a`, `_52b`, `_52c` 등)은 한 번만 잡고 `*_52*` 와일드카드로 함께 컴파일합니다.
+- testcase 그룹핑은 Juliet 파일명 정규식 기반으로 수행합니다.
+- 같은 flow variant 그룹(예: `_52a/_52b/_52c`, `_81a/_81_bad/_81_goodG2B`)은 한 번만 실행하고 함께 컴파일합니다.
+- `--files`를 주면 `cwes` 인자는 무시되고, 지정 파일 모드로 실행됩니다.
+- `--files`에서도 동일한 그룹핑 로직이 적용됩니다(단일 파일 지정 시에도 같은 flow variant 파일들을 자동 포함).
 - `--max-cases`는 CWE당 실행 그룹 수를 제한해 스모크 테스트에 유용합니다.
 - Pulse taint 설정은 `tools/pulse-taint-config.json`을 고정 경로로 사용합니다.

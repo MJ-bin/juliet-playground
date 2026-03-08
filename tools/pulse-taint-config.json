@@ -1,14 +1,165 @@
 {
   "pulse-taint-sources": [
     {
+      "procedure": "fread",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "read",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "slurp_read",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "fscanf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "recv",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "recvfrom",
+      "taint_target": "AllArguments"
+    },
+    {
       "procedure": "fgets",
-      "taint_target": ["ArgumentPositions", [0]]
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "getc"
+    },
+    {
+      "procedure": "_IO_getc"
+    },
+    {
+      "procedure": "fgetc"
+    },
+    {
+      "procedure": "getenv"
+    },
+    {
+      "procedure": "gnutls_x509_crt_get_subject_alt_name",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "readdir"
     }
   ],
   "pulse-taint-sinks": [
     {
+      "procedure": "malloc",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "realloc",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "calloc",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "g_malloc",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "free",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "memset",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "sprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "snprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "fprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "vfprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "vsprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "vsnprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "vprintf",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "system",
+      "taint_target": "AllArguments"
+    },
+    {
       "procedure": "execl",
-      "taint_target": ["ArgumentPositions", [3]]
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "execve",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "popen",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "execlp",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "execle",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "execvp",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printHexCharLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printIntLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printUnsignedLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printLongLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printLongLongLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printLine",
+      "taint_target": "AllArguments"
+    },
+    {
+      "procedure": "printStructLine",
+      "taint_target": "AllArguments"
     }
   ]
 }
