@@ -9,6 +9,11 @@ Juliet C/C++ 테스트 스위트에 대해 Infer를 실험적으로 실행해보
   - 결과를 `issue / no_issue / error`로 집계합니다.
   - 옵션으로 `result.csv`, `no_issue_files.txt`를 생성합니다.
 
+- `tools/generate-signature.py`
+  - `artifacts`의 최신 `juliet-result-*`를 자동 선택해 signature JSON을 생성합니다.
+  - 기본적으로 `TAINT_ERROR`만 추출합니다.
+  - 결과를 `artifacts/signatures/signatures-result-*` 아래에 저장합니다.
+
 - `tools/paths.py`
   - 프로젝트 루트, Juliet testcase 경로, 결과 경로, infer 바이너리 경로를 정의합니다.
 
@@ -70,6 +75,22 @@ python tools/run-infer-all-juliet.py 78 --max-cases 3 --generate-csv
 python tools/run-infer-all-juliet.py 78
 ```
 
+### 4) Signature 생성 (기본: 최신 결과 + TAINT_ERROR만)
+
+```bash
+python tools/generate-signature.py
+```
+
+### 5) Signature 생성 옵션
+
+```bash
+# 입력 결과 폴더 명시
+python tools/generate-signature.py --input-dir artifacts/juliet-result-2026.03.08-18:04:18
+
+# 모든 이슈 타입 추출(TAINT_ERROR 필터 해제)
+python tools/generate-signature.py --all-issues
+```
+
 ## 결과 위치
 
 기본적으로 실행마다 아래가 새로 생성됩니다.
@@ -78,6 +99,9 @@ python tools/run-infer-all-juliet.py 78
   - `CWE.../infer-out` (케이스별 Infer 산출물)
   - `no_issue_files.txt`
   - `result.csv` (`--generate-csv` 사용 시)
+
+- `artifacts/signatures/signatures-result-YYYY.MM.DD-HH:MM:SS/`
+  - `CWE.../*.json` (alarm별 분리된 signature JSON)
 
 ## 동작 메모
 
