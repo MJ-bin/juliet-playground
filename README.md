@@ -70,6 +70,13 @@ artifacts/
         │   ├── leftover_counterparts.jsonl
         │   ├── split_manifest.json
         │   └── paired_signatures/<testcase_key>/{b2b.json,g2b.json,...}
+        ├── 06_slices/
+        │   ├── slice/*.c|*.cpp
+        │   └── summary.json
+        ├── 07_tokenized/
+        │   ├── slice_token_counts.csv
+        │   ├── slice_token_distribution.png
+        │   └── summary.json
         └── run_summary.json
 ```
 
@@ -84,12 +91,18 @@ artifacts/
   - `infer-out/report.json`에서 `bug_trace`가 있는 이슈를 `non_empty/`에 JSON으로 분리 저장
   - `non_empty/analysis/signature_counts.csv`에 CWE별 통계 저장
 - **통합 파이프라인**: `tools/run-epic001-pipeline.py`
-  - `manifest -> with_comments -> taint config -> flow xml -> infer/signature -> trace_flow_filter -> paired_trace_ds`
+  - `manifest -> with_comments -> taint config -> flow xml -> infer/signature -> trace_flow_filter -> paired_trace_ds -> slices -> tokenized`
   - 실행별 산출물을 `artifacts/pipeline-runs/...`에 분리 저장
 - **Paired trace dataset 생성**: `tools/build-paired-trace-signatures.py`
   - `trace_flow_match_strict.jsonl`에서 testcase별 `b2b` / 대응 trace를 1:1로 선택
   - 대응 후보가 여러 개면 `bug_trace_length`가 가장 긴 trace를 선택하고 나머지는 별도 보관
   - `paired_signatures/<testcase_key>/b2b.json`, `g2b.json` 등의 형태로 출력
+- **Slice 생성**: `tools/generate_slices.py`
+  - `paired_signatures`의 `bug_trace`에서 소스 라인만 모아 슬라이스 생성
+  - `.c`는 `.c`, C++ trace는 `.cpp`로 저장
+- **Slice 토큰화/그래프**: `tools/tokenize_slices.py`
+  - 생성된 `.c/.cpp` 슬라이스를 CodeBERT 토크나이저로 토큰화
+  - `scienceplots` 스타일 히스토그램과 CSV 생성
 
 ## 그 외 자주 쓰는 명령어
 
@@ -114,6 +127,24 @@ python tools/build-paired-trace-signatures.py \
 # 옵션 없이 실행하면 최신 pipeline run의 strict trace를 찾아
 # 같은 run 아래 05_pair_trace_ds/ 로 출력
 python tools/build-paired-trace-signatures.py
+
+# paired_signatures 로부터 slice 생성
+python tools/generate_slices.py \
+  --signature-db-dir artifacts/pipeline-runs/run-2026.03.09-22:18:32/05_pair_trace_ds/paired_signatures \
+  --output-dir /tmp/paired-slices
+
+# 옵션 없이 실행하면 최신 pipeline run의 paired_signatures 를 찾아
+# 같은 run 아래 06_slices/ 로 출력
+python tools/generate_slices.py
+
+# slice(.c/.cpp) 토큰화 + 그래프 생성
+python tools/tokenize_slices.py \
+  --slice-dir artifacts/pipeline-runs/run-2026.03.09-22:18:32/06_slices/slice \
+  --output-dir /tmp/tokenized-slices
+
+# 옵션 없이 실행하면 최신 pipeline run의 06_slices/slice 를 찾아
+# 같은 run 아래 07_tokenized/ 로 출력
+python tools/tokenize_slices.py
 ```
 
 ## 메모

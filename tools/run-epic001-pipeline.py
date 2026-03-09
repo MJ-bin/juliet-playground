@@ -136,6 +136,8 @@ def main(
     signatures_root = run_dir / '03_signatures'
     trace_dir = run_dir / '04_trace_flow'
     pair_dir = run_dir / '05_pair_trace_ds'
+    slice_stage_dir = run_dir / '06_slices'
+    token_stage_dir = run_dir / '07_tokenized'
     logs_dir = run_dir / 'logs'
 
     manifest_with_comments_xml = manifest_dir / 'manifest_with_comments.xml'
@@ -156,6 +158,11 @@ def main(
     split_manifest_json = pair_dir / 'split_manifest.json'
     paired_signatures_dir = pair_dir / 'paired_signatures'
     paired_trace_summary_json = pair_dir / 'summary.json'
+    slice_dir = slice_stage_dir / 'slice'
+    slice_summary_json = slice_stage_dir / 'summary.json'
+    slice_token_counts_csv = token_stage_dir / 'slice_token_counts.csv'
+    slice_token_distribution_png = token_stage_dir / 'slice_token_distribution.png'
+    slice_token_summary_json = token_stage_dir / 'summary.json'
     run_summary_path = run_dir / 'run_summary.json'
 
     source_testcases_root = source_root / 'testcases'
@@ -168,6 +175,8 @@ def main(
     infer_script = Path(PROJECT_HOME) / 'tools' / 'run-infer-all-juliet.py'
     filter_script = Path(PROJECT_HOME) / 'experiments' / 'epic001d_trace_flow_filter' / 'scripts' / 'filter_traces_by_flow.py'
     pair_script = Path(PROJECT_HOME) / 'tools' / 'build-paired-trace-signatures.py'
+    slice_script = Path(PROJECT_HOME) / 'tools' / 'generate_slices.py'
+    tokenize_script = Path(PROJECT_HOME) / 'tools' / 'tokenize_slices.py'
 
     started_at = now_iso_utc()
     start_perf = time.perf_counter()
@@ -339,6 +348,44 @@ def main(
         if not paired_trace_summary_json.exists():
             raise RuntimeError(f'Expected paired trace summary not found: {paired_trace_summary_json}')
 
+        # Step 06: generate source slices from paired signatures
+        steps['06_generate_slices'] = run_command(
+            '06_generate_slices',
+            [
+                sys.executable,
+                str(slice_script),
+                '--signature-db-dir', str(paired_signatures_dir),
+                '--output-dir', str(slice_stage_dir),
+            ],
+            cwd=Path(PROJECT_HOME),
+            logs_dir=logs_dir,
+        )
+
+        if not slice_dir.exists():
+            raise RuntimeError(f'Expected slice dir not found: {slice_dir}')
+        if not slice_summary_json.exists():
+            raise RuntimeError(f'Expected slice summary not found: {slice_summary_json}')
+
+        # Step 07: tokenize slices and draw scienceplots histogram
+        steps['07_tokenize_slices'] = run_command(
+            '07_tokenize_slices',
+            [
+                sys.executable,
+                str(tokenize_script),
+                '--slice-dir', str(slice_dir),
+                '--output-dir', str(token_stage_dir),
+            ],
+            cwd=Path(PROJECT_HOME),
+            logs_dir=logs_dir,
+        )
+
+        if not slice_token_counts_csv.exists():
+            raise RuntimeError(f'Expected token counts CSV not found: {slice_token_counts_csv}')
+        if not slice_token_distribution_png.exists():
+            raise RuntimeError(f'Expected token distribution plot not found: {slice_token_distribution_png}')
+        if not slice_token_summary_json.exists():
+            raise RuntimeError(f'Expected token summary not found: {slice_token_summary_json}')
+
     except Exception as exc:
         status = 'failed'
         error_message = str(exc)
@@ -388,6 +435,11 @@ def main(
             'split_manifest_json': str(split_manifest_json),
             'paired_signatures_dir': str(paired_signatures_dir),
             'paired_trace_summary_json': str(paired_trace_summary_json),
+            'slice_dir': str(slice_dir),
+            'slice_summary_json': str(slice_summary_json),
+            'slice_token_counts_csv': str(slice_token_counts_csv),
+            'slice_token_distribution_png': str(slice_token_distribution_png),
+            'slice_token_summary_json': str(slice_token_summary_json),
         },
         'infer_summary': infer_summary,
     }
