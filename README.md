@@ -37,6 +37,12 @@ source .venv/bin/activate && python tools/run-infer-all-juliet.py 78
 source .venv/bin/activate && python tools/run-epic001-pipeline.py 78
 ```
 
+전체 CWE에 대해 실행하려면:
+
+```bash
+source .venv/bin/activate && python tools/run-epic001-pipeline.py --all
+```
+
 기본 run-id 규칙은 `run-YYYY.MM.DD-HH:MM:SS` 이며,
 실제 경로는 `artifacts/pipeline-runs/run-.../` 입니다.
 
@@ -86,13 +92,14 @@ artifacts/
   - CWE 단위/파일 단위로 Juliet 테스트케이스를 실행
   - `issue / no_issue / error` 집계, `analysis/result.csv`, `analysis/no_issue_files.txt` 생성
   - infer 실행 후 signature도 생성
-  - 옵션: `--pulse-taint-config`, `--infer-results-root`, `--signatures-root`, `--summary-json`
+  - 옵션: `--all`, `--files`, `--pulse-taint-config`, `--infer-results-root`, `--signatures-root`, `--summary-json`
 - **Signature 생성**: `tools/generate-signature.py`
   - `infer-out/report.json`에서 `bug_trace`가 있는 이슈를 `non_empty/`에 JSON으로 분리 저장
   - `non_empty/analysis/signature_counts.csv`에 CWE별 통계 저장
 - **통합 파이프라인**: `tools/run-epic001-pipeline.py`
   - `manifest -> with_comments -> taint config -> flow xml -> infer/signature -> trace_flow_filter -> paired_trace_ds -> slices -> tokenized`
   - 실행별 산출물을 `artifacts/pipeline-runs/...`에 분리 저장
+  - 타깃 지정: `CWE 번호들` / `--all` / `--files ...`
 - **Paired trace dataset 생성**: `tools/build-paired-trace-signatures.py`
   - `trace_flow_match_strict.jsonl`에서 testcase별 `b2b` / 대응 trace를 1:1로 선택
   - 대응 후보가 여러 개면 `bug_trace_length`가 가장 긴 trace를 선택하고 나머지는 별도 보관
@@ -118,6 +125,9 @@ python tools/generate-signature.py --input-dir artifacts/infer-results/infer-202
 
 # 통합 파이프라인 (CWE 여러개)
 python tools/run-epic001-pipeline.py 78 89
+
+# 통합 파이프라인 (전체 CWE)
+python tools/run-epic001-pipeline.py --all
 
 # strict trace 결과만으로 paired trace dataset 생성
 python tools/build-paired-trace-signatures.py \
@@ -150,7 +160,8 @@ python tools/tokenize_slices.py
 ## 메모
 
 - `.cpp`는 `clang++`, `.c`는 `clang` 사용
-- `--files` 사용 시 `cwes` 인자는 무시
+- `--files` 사용 시 `cwes` / `--all` 은 무시
+- `--all` 사용 시 `cwes` 인자는 무시
 - Juliet 파일명 규칙 기반으로 같은 flow variant 그룹을 함께 컴파일
 - Pulse taint 기준 설정: `config/pulse-taint-config.json`
 - 파이프라인 생성 taint config: `.../02a_taint/pulse-taint-config.json` (수동 승격 대상)

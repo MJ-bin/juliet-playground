@@ -81,8 +81,10 @@ def run_command(step_key: str, cmd: List[str], cwd: Path,
 
 def main(
     cwes: Optional[List[int]] = typer.Argument(None),
+    all_cwes: bool = typer.Option(
+        False, '--all', help='Run the pipeline for all CWEs in the testcase directory'),
     files: List[str] = typer.Option(
-        [], '--files', help='Run infer for specific files (repeatable); if set, cwes are ignored'),
+        [], '--files', help='Run infer for specific files (repeatable); if set, cwes and --all are ignored'),
     manifest: Path = typer.Option(
         Path(PROJECT_HOME) / 'experiments' / 'epic001_manifest_comment_scan' / 'inputs' / 'manifest.xml',
         '--manifest',
@@ -118,8 +120,8 @@ def main(
         raise typer.BadParameter(f'Source root not found: {source_root}')
     if not committed_taint_config.exists():
         raise typer.BadParameter(f'Committed taint config not found: {committed_taint_config}')
-    if not files and not cwes:
-        raise typer.BadParameter('Provide cwes or use --files')
+    if not files and not all_cwes and not cwes:
+        raise typer.BadParameter('Provide cwes, use --all, or use --files')
 
     if run_id is None:
         run_id = f'run-{now_ts()}'
@@ -283,6 +285,8 @@ def main(
         if files:
             for f in files:
                 infer_cmd.extend(['--files', f])
+        elif all_cwes:
+            infer_cmd.append('--all')
         else:
             infer_cmd[2:2] = [str(x) for x in cwes or []]
 
@@ -408,7 +412,8 @@ def main(
         'run_dir': str(run_dir),
         'input_manifest': str(manifest.resolve()),
         'source_root': str(source_root.resolve()),
-        'mode': 'files' if files else 'cwes',
+        'mode': 'files' if files else ('all' if all_cwes else 'cwes'),
+        'all_cwes': all_cwes,
         'cwes': cwes or [],
         'files': files,
         'pair_split_seed': pair_split_seed,
