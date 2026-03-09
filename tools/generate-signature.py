@@ -71,6 +71,8 @@ def generate_signatures(input_dir: Path,
     for d in sorted(
             name for name in os.listdir(input_dir)
             if os.path.isdir(os.path.join(input_dir, name))):
+        if d == 'analysis':
+            continue
         print('Generating signatures from {}'.format(d))
         report = '{}/{}/infer-out/report.json'.format(input_dir, d)
         if not os.path.exists(report):

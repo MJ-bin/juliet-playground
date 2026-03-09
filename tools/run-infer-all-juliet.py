@@ -272,7 +272,9 @@ def run_infer_for_files(files: List[str], result_dir: str,
 
 
 def generate_result_csv(result_map, result_dir):
-    csv_path = os.path.join(result_dir, 'result.csv')
+    analysis_dir = os.path.join(result_dir, 'analysis')
+    os.makedirs(analysis_dir, exist_ok=True)
+    csv_path = os.path.join(analysis_dir, 'result.csv')
     with open(csv_path, 'w') as csvfile:
         writer = csv.writer(csvfile)
 
@@ -294,7 +296,9 @@ def generate_result_csv(result_map, result_dir):
 
 
 def generate_no_issue_files(result_map, result_dir):
-    txt_path = os.path.join(result_dir, 'no_issue_files.txt')
+    analysis_dir = os.path.join(result_dir, 'analysis')
+    os.makedirs(analysis_dir, exist_ok=True)
+    txt_path = os.path.join(analysis_dir, 'no_issue_files.txt')
     with open(txt_path, 'w') as f:
         for cwe_number in result_map:
             no_issue_files = result_map[cwe_number]['no_issue_files']
