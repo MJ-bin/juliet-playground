@@ -22,6 +22,7 @@ from paths import PROJECT_HOME, RESULT_DIR, PULSE_TAINT_CONFIG
 
 CPP_LIKE_SUFFIXES = {'.cpp', '.cc', '.cxx', '.c++', '.hpp', '.hh', '.hxx'}
 ROLE_SORT_ORDER = {'b2b': 0, 'counterpart': 1}
+PROJECT_HOME_PATH = Path(PROJECT_HOME).resolve()
 
 
 def now_ts() -> str:
@@ -30,6 +31,57 @@ def now_ts() -> str:
 
 def now_iso_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def normalize_artifact_path(path: Path | str) -> str:
+    raw = str(path or '').strip()
+    if not raw:
+        return ''
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        return str(candidate)
+    resolved = candidate.resolve()
+    try:
+        return str(resolved.relative_to(PROJECT_HOME_PATH))
+    except ValueError:
+        return str(resolved)
+
+
+def unique_in_order(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def build_dedup_audit_row(*,
+                          record: dict[str, Any],
+                          dedup_reason: str,
+                          dedup_trigger_hashes: list[str],
+                          matched_kept_record: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        'pair_id': str(record['pair_id']),
+        'testcase_key': str(record['testcase_key']),
+        'role': str(record['role']),
+        'role_name': str(record['role_name']),
+        'target': int(record['target']),
+        'project': 'Juliet',
+        'source_signature_path': str(record.get('source_signature_path') or ''),
+        'normalized_code_hash': str(record.get('normalized_code_hash') or ''),
+        'dedup_reason': dedup_reason,
+        'dedup_trigger_hashes': '|'.join(dedup_trigger_hashes),
+        'matched_kept_pair_id': str(matched_kept_record.get('pair_id') or '') if matched_kept_record else '',
+        'matched_kept_role': str(matched_kept_record.get('role') or '') if matched_kept_record else '',
+        'matched_kept_source_signature_path': (
+            str(matched_kept_record.get('source_signature_path') or '') if matched_kept_record else ''
+        ),
+        'matched_kept_unique_id': '',
+        'processed_func': str(record['normalized_code']),
+    }
 
 
 def sha256_file(path: Path) -> Optional[str]:
@@ -448,7 +500,7 @@ def dedupe_pairs_by_normalized_rows(
     surviving_pairs: dict[str, list[dict[str, Any]]],
     filtered_pair_reasons: Counter,
     dedup_mode: str,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[dict[str, Any]]]:
     if dedup_mode not in {'none', 'row'}:
         raise ValueError(f'Unsupported dedup_mode: {dedup_mode}')
 
@@ -497,8 +549,11 @@ def dedupe_pairs_by_normalized_rows(
         deduped_pairs = surviving_pairs
         pairs_dropped_duplicate = 0
         pairs_dropped_collision = 0
+        dedup_audit_rows: list[dict[str, Any]] = []
     else:
         deduped_pairs: dict[str, list[dict[str, Any]]] = {}
+        dedup_audit_rows = []
+        kept_record_by_hash: dict[str, dict[str, Any]] = {}
         seen_hashes: set[str] = set()
         pairs_dropped_duplicate = 0
         pairs_dropped_collision = 0
@@ -509,18 +564,45 @@ def dedupe_pairs_by_normalized_rows(
                 key=lambda row: ROLE_SORT_ORDER.get(str(row['role']), 99),
             )
             pair_hashes = [str(record['normalized_code_hash']) for record in pair_records]
+            collision_trigger_hashes = unique_in_order(
+                [code_hash for code_hash in pair_hashes if code_hash in colliding_hashes]
+            )
+            duplicate_trigger_hashes = unique_in_order(
+                [code_hash for code_hash in pair_hashes if code_hash in seen_hashes]
+            )
 
-            if any(code_hash in colliding_hashes for code_hash in pair_hashes):
+            if collision_trigger_hashes:
                 filtered_pair_reasons['dedup_row_hash_collision'] += 1
                 pairs_dropped_collision += 1
+                for record in pair_records:
+                    dedup_audit_rows.append(
+                        build_dedup_audit_row(
+                            record=record,
+                            dedup_reason='collision_pair',
+                            dedup_trigger_hashes=collision_trigger_hashes,
+                            matched_kept_record=None,
+                        )
+                    )
                 continue
-            if any(code_hash in seen_hashes for code_hash in pair_hashes):
+            if duplicate_trigger_hashes:
                 filtered_pair_reasons['dedup_duplicate_normalized_slice'] += 1
                 pairs_dropped_duplicate += 1
+                for record in pair_records:
+                    dedup_audit_rows.append(
+                        build_dedup_audit_row(
+                            record=record,
+                            dedup_reason='duplicate_pair',
+                            dedup_trigger_hashes=duplicate_trigger_hashes,
+                            matched_kept_record=kept_record_by_hash.get(str(record['normalized_code_hash'])),
+                        )
+                    )
                 continue
 
             deduped_pairs[pair_id] = pair_records
-            seen_hashes.update(pair_hashes)
+            for record in pair_records:
+                code_hash = str(record['normalized_code_hash'])
+                seen_hashes.add(code_hash)
+                kept_record_by_hash[code_hash] = record
 
     rows_after = sum(len(records) for records in deduped_pairs.values())
     dedup_summary = {
@@ -540,7 +622,7 @@ def dedupe_pairs_by_normalized_rows(
         'collision_hash_groups': len(colliding_hashes),
         'collision_row_occurrences': collision_row_occurrences,
     }
-    return deduped_pairs, dedup_summary
+    return deduped_pairs, dedup_summary, dedup_audit_rows
 
 
 def find_slice_path(slice_dir: Path, testcase_key: str, role_name: str) -> Path | None:
@@ -601,6 +683,7 @@ def export_dataset_from_pipeline(*,
     normalized_slices_dir.mkdir(parents=True, exist_ok=True)
 
     real_vul_data_csv = output_dir / 'Real_Vul_data.csv'
+    dedup_dropped_csv = output_dir / 'Real_Vul_data_dedup_dropped.csv'
     normalized_token_counts_csv = output_dir / 'normalized_token_counts.csv'
     slice_token_distribution_png = output_dir / 'slice_token_distribution.png'
     split_manifest_json = output_dir / 'split_manifest.json'
@@ -716,6 +799,7 @@ def export_dataset_from_pipeline(*,
                 'extension': slice_path.suffix.lower(),
                 'slice_path': str(slice_path),
                 'signature_path': str(signature_path),
+                'source_signature_path': normalize_artifact_path(signature_path),
                 'normalized_code': normalized_code,
                 'code_token_count': token_count,
                 'input_token_count_with_special': input_token_count,
@@ -734,11 +818,13 @@ def export_dataset_from_pipeline(*,
             continue
         surviving_pairs[pair_id] = pair_records
 
-    surviving_pairs, dedup_summary = dedupe_pairs_by_normalized_rows(
+    surviving_pairs, dedup_summary, dedup_audit_rows = dedupe_pairs_by_normalized_rows(
         surviving_pairs=surviving_pairs,
         filtered_pair_reasons=filtered_pair_reasons,
         dedup_mode=dedup_mode,
     )
+    dedup_dropped_pairs = len({str(row['pair_id']) for row in dedup_audit_rows})
+    dedup_dropped_rows = len(dedup_audit_rows)
 
     token_count_rows = sorted(
         [row for pair_records in surviving_pairs.values() for row in pair_records],
@@ -791,23 +877,75 @@ def export_dataset_from_pipeline(*,
             'target',
             'vulnerable_line_numbers',
             'project',
+            'source_signature_path',
             'commit_hash',
             'dataset_type',
             'processed_func',
         ])
+        kept_unique_id_by_pair_role: dict[tuple[str, str], int] = {}
         for idx, row in enumerate(ordered_rows, start=1):
             output_filename = f'{idx}{row["extension"]}'
             (normalized_slices_dir / output_filename).write_text(row['normalized_code'], encoding='utf-8')
             vulnerable_line_numbers = 1 if int(row['target']) == 1 else ''
+            kept_unique_id_by_pair_role[(str(row['pair_id']), str(row['role']))] = idx
             writer.writerow([
                 idx,
                 idx,
                 row['target'],
                 vulnerable_line_numbers,
                 'Juliet',
+                row['source_signature_path'],
                 '',
                 row['dataset_type'],
                 row['normalized_code'],
+            ])
+
+    for audit_row in dedup_audit_rows:
+        matched_pair_id = str(audit_row.get('matched_kept_pair_id') or '')
+        matched_role = str(audit_row.get('matched_kept_role') or '')
+        if matched_pair_id and matched_role:
+            audit_row['matched_kept_unique_id'] = str(
+                kept_unique_id_by_pair_role.get((matched_pair_id, matched_role), '')
+            )
+
+    with dedup_dropped_csv.open('w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'dropped_row_id',
+            'pair_id',
+            'testcase_key',
+            'role',
+            'role_name',
+            'target',
+            'project',
+            'source_signature_path',
+            'normalized_code_hash',
+            'dedup_reason',
+            'dedup_trigger_hashes',
+            'matched_kept_pair_id',
+            'matched_kept_role',
+            'matched_kept_source_signature_path',
+            'matched_kept_unique_id',
+            'processed_func',
+        ])
+        for dropped_row_id, row in enumerate(dedup_audit_rows, start=1):
+            writer.writerow([
+                dropped_row_id,
+                row['pair_id'],
+                row['testcase_key'],
+                row['role'],
+                row['role_name'],
+                row['target'],
+                row['project'],
+                row['source_signature_path'],
+                row['normalized_code_hash'],
+                row['dedup_reason'],
+                row['dedup_trigger_hashes'],
+                row['matched_kept_pair_id'],
+                row['matched_kept_role'],
+                row['matched_kept_source_signature_path'],
+                row['matched_kept_unique_id'],
+                row['processed_func'],
             ])
 
     split_manifest = {
@@ -816,6 +954,7 @@ def export_dataset_from_pipeline(*,
         'pairs_jsonl': str(pairs_jsonl),
         'paired_signatures_dir': str(paired_signatures_dir),
         'slice_dir': str(slice_dir),
+        'dedup_dropped_csv': str(dedup_dropped_csv),
         'dedup': dedup_summary,
         'split_unit': 'pair_id',
         'train_ratio': train_ratio,
@@ -826,6 +965,8 @@ def export_dataset_from_pipeline(*,
             'train_val': sum(1 for v in split_map.values() if v == 'train_val'),
             'test': sum(1 for v in split_map.values() if v == 'test'),
             'rows_total': len(ordered_rows),
+            'dedup_dropped_pairs': dedup_dropped_pairs,
+            'dedup_dropped_rows': dedup_dropped_rows,
         },
         'pair_ids': {
             'train_val': sorted(pair_id for pair_id, value in split_map.items() if value == 'train_val'),
@@ -845,6 +986,8 @@ def export_dataset_from_pipeline(*,
     counts['pairs_survived'] = len(surviving_pairs)
     counts['pairs_filtered_out'] = sum(filtered_pair_reasons.values())
     counts['rows_written'] = len(ordered_rows)
+    counts['dedup_dropped_pairs'] = dedup_dropped_pairs
+    counts['dedup_dropped_rows'] = dedup_dropped_rows
     counts['source_files_total'] = len(source_files_seen)
     counts['source_files_parse_failed'] = len(source_files_failed)
     counts['train_val_pairs'] = sum(1 for v in split_map.values() if v == 'train_val')
@@ -859,6 +1002,7 @@ def export_dataset_from_pipeline(*,
         'output_dir': str(output_dir),
         'normalized_slices_dir': str(normalized_slices_dir),
         'real_vul_data_csv': str(real_vul_data_csv),
+        'dedup_dropped_csv': str(dedup_dropped_csv),
         'normalized_token_counts_csv': str(normalized_token_counts_csv),
         'slice_token_distribution_png': str(slice_token_distribution_png),
         'split_manifest_json': str(split_manifest_json),
@@ -889,6 +1033,7 @@ def export_dataset_from_pipeline(*,
         'output_dir': str(output_dir),
         'normalized_slices_dir': str(normalized_slices_dir),
         'real_vul_data_csv': str(real_vul_data_csv),
+        'dedup_dropped_csv': str(dedup_dropped_csv),
         'normalized_token_counts_csv': str(normalized_token_counts_csv),
         'slice_token_distribution_png': str(slice_token_distribution_png),
         'split_manifest_json': str(split_manifest_json),
@@ -997,11 +1142,15 @@ def main(
     )
     normalized_slices_dir = dataset_stage_dir / 'normalized_slices'
     real_vul_data_csv = dataset_stage_dir / 'Real_Vul_data.csv'
+    real_vul_data_dedup_dropped_csv = dataset_stage_dir / 'Real_Vul_data_dedup_dropped.csv'
     normalized_token_counts_csv = dataset_stage_dir / 'normalized_token_counts.csv'
     slice_token_distribution_png = dataset_stage_dir / 'slice_token_distribution.png'
     dataset_split_manifest_json = dataset_stage_dir / 'split_manifest.json'
     dataset_summary_json = dataset_stage_dir / 'summary.json'
     train_patched_counterparts_csv = dataset_stage_dir / 'train_patched_counterparts.csv'
+    train_patched_counterparts_dedup_dropped_csv = (
+        dataset_stage_dir / 'train_patched_counterparts_dedup_dropped.csv'
+    )
     train_patched_counterparts_slices_dir = dataset_stage_dir / 'train_patched_counterparts_slices'
     train_patched_counterparts_token_counts_csv = (
         dataset_stage_dir / 'train_patched_counterparts_token_counts.csv'
@@ -1237,6 +1386,11 @@ def main(
             raise RuntimeError(f'Expected normalized slices dir not found: {normalized_slices_dir}')
         if not real_vul_data_csv.exists():
             raise RuntimeError(f'Expected Real_Vul_data.csv not found: {real_vul_data_csv}')
+        if not real_vul_data_dedup_dropped_csv.exists():
+            raise RuntimeError(
+                'Expected Real_Vul_data dedup dropped CSV not found: '
+                f'{real_vul_data_dedup_dropped_csv}'
+            )
         if not normalized_token_counts_csv.exists():
             raise RuntimeError(f'Expected normalized token counts CSV not found: {normalized_token_counts_csv}')
         if not slice_token_distribution_png.exists():
@@ -1288,6 +1442,11 @@ def main(
             raise RuntimeError(
                 'Expected train_patched_counterparts CSV not found: '
                 f'{train_patched_counterparts_csv}'
+            )
+        if not train_patched_counterparts_dedup_dropped_csv.exists():
+            raise RuntimeError(
+                'Expected train_patched_counterparts dedup dropped CSV not found: '
+                f'{train_patched_counterparts_dedup_dropped_csv}'
             )
         if not train_patched_counterparts_slices_dir.exists():
             raise RuntimeError(
@@ -1375,11 +1534,13 @@ def main(
             'dataset_export_dir': str(dataset_stage_dir),
             'normalized_slices_dir': str(normalized_slices_dir),
             'real_vul_data_csv': str(real_vul_data_csv),
+            'real_vul_data_dedup_dropped_csv': str(real_vul_data_dedup_dropped_csv),
             'normalized_token_counts_csv': str(normalized_token_counts_csv),
             'slice_token_distribution_png': str(slice_token_distribution_png),
             'dataset_split_manifest_json': str(dataset_split_manifest_json),
             'dataset_summary_json': str(dataset_summary_json),
             'train_patched_counterparts_csv': str(train_patched_counterparts_csv),
+            'train_patched_counterparts_dedup_dropped_csv': str(train_patched_counterparts_dedup_dropped_csv),
             'train_patched_counterparts_slices_dir': str(train_patched_counterparts_slices_dir),
             'train_patched_counterparts_token_counts_csv': str(train_patched_counterparts_token_counts_csv),
             'train_patched_counterparts_token_distribution_png': str(train_patched_counterparts_token_distribution_png),
