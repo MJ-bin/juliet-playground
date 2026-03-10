@@ -84,11 +84,13 @@ artifacts/
         ├── 07_dataset_export/
         │   ├── normalized_slices/*.c|*.cpp
         │   ├── Real_Vul_data.csv
+        │   ├── Real_Vul_data_dedup_dropped.csv
         │   ├── normalized_token_counts.csv
         │   ├── slice_token_distribution.png
         │   ├── split_manifest.json
         │   ├── summary.json
         │   ├── train_patched_counterparts.csv
+        │   ├── train_patched_counterparts_dedup_dropped.csv
         │   └── train_patched_counterparts_slices/*.c|*.cpp
         └── run_summary.json
 ```
@@ -118,12 +120,16 @@ artifacts/
   - 06에서 만든 slice를 기준으로 사용자 정의 함수명만 normalize
   - normalize 후 공백 무시 MD5(`md5("".join(code.split()))`) 기준으로 row-level dedup 수행
   - dedup 이후 CodeBERT 토큰 수를 재계산하고 pair 단위로 510 토큰 이하만 필터링/분할
-  - `Real_Vul_data.csv`, `normalized_slices/`, 히스토그램/CSV를 생성
+  - `Real_Vul_data.csv`에 `source_signature_path` 칼럼을 추가해 row 출처 추적 가능
+  - dedup으로 제거된 row/pair는 `Real_Vul_data_dedup_dropped.csv`로 별도 저장
+  - `normalized_slices/`, 히스토그램/CSV를 생성
 - **Train patched counterpart export**: `tools/export_train_patched_counterparts.py`
   - 기존 `07_dataset_export/split_manifest.json`에서 `train_val`로 사용된 pair만 대상으로 함
   - `leftover_counterparts.jsonl`에서 testcase별 최상위 leftover counterpart 1개를 골라 평가용 데이터셋 생성
   - base export와 동일하게 normalized slice 기준 dedup 가능 (`--dedup-mode`)
-  - `train_patched_counterparts.csv`, `train_patched_counterparts_slices/`, 관련 summary/manifest를 생성
+  - `train_patched_counterparts.csv`에도 `source_signature_path` 칼럼을 추가
+  - dedup으로 제거된 row/pair는 `train_patched_counterparts_dedup_dropped.csv`로 별도 저장
+  - `train_patched_counterparts_slices/`, 관련 summary/manifest를 생성
 
 ## 그 외 자주 쓰는 명령어
 
