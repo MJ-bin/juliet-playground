@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import random
 import shutil
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -72,18 +71,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--split-seed",
-        type=int,
-        default=1234,
-        help="Random seed for testcase-level train/test split",
-    )
-    parser.add_argument(
-        "--train-ratio",
-        type=float,
-        default=0.8,
-        help="Train ratio for testcase-level split (default: 0.8)",
-    )
-    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Overwrite output-dir contents if they already exist",
@@ -134,13 +121,11 @@ def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path | None]:
     return trace_jsonl, output_dir, run_dir
 
 
-def validate_args(args: argparse.Namespace, trace_jsonl: Path) -> None:
+def validate_args(trace_jsonl: Path) -> None:
     if not trace_jsonl.exists():
         raise FileNotFoundError(f"Strict trace JSONL not found: {trace_jsonl}")
     if not trace_jsonl.is_file():
         raise FileNotFoundError(f"Strict trace JSONL is not a file: {trace_jsonl}")
-    if not (0.0 < args.train_ratio < 1.0):
-        raise ValueError(f"--train-ratio must be between 0 and 1: {args.train_ratio}")
 
 
 def prepare_output_dir(output_dir: Path, overwrite: bool) -> None:
@@ -227,26 +212,6 @@ def make_pair_id(testcase_key: str, b2b_record: StrictTraceRecord,
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
 
 
-def compute_test_split(testcase_keys: list[str], train_ratio: float,
-                       seed: int) -> dict[str, str]:
-    keys = sorted(set(testcase_keys))
-    shuffled = list(keys)
-    random.Random(seed).shuffle(shuffled)
-
-    test_ratio = 1.0 - train_ratio
-    test_count = int(round(len(shuffled) * test_ratio))
-    if len(shuffled) > 1:
-        test_count = max(1, min(len(shuffled) - 1, test_count))
-    else:
-        test_count = 0
-
-    test_keys = set(shuffled[:test_count])
-    split_map: dict[str, str] = {}
-    for key in shuffled:
-        split_map[key] = "test" if key in test_keys else "train_val"
-    return split_map
-
-
 def load_signature_payload(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Signature JSON not found: {path}")
@@ -273,7 +238,7 @@ def signature_meta(payload: dict[str, Any], record: StrictTraceRecord) -> dict[s
 def main() -> int:
     args = parse_args()
     trace_jsonl, output_dir, run_dir = resolve_paths(args)
-    validate_args(args, trace_jsonl)
+    validate_args(trace_jsonl)
     prepare_output_dir(output_dir, args.overwrite)
 
     paired_signatures_dir = output_dir / "paired_signatures"
@@ -281,7 +246,6 @@ def main() -> int:
 
     pairs_jsonl = output_dir / "pairs.jsonl"
     leftovers_jsonl = output_dir / "leftover_counterparts.jsonl"
-    split_manifest_json = output_dir / "split_manifest.json"
     summary_json = output_dir / "summary.json"
 
     strict_records = load_strict_records(trace_jsonl)
@@ -345,17 +309,10 @@ def main() -> int:
                 }
             )
 
-    split_map = compute_test_split(
-        [pair["testcase_key"] for pair in pair_candidates],
-        train_ratio=args.train_ratio,
-        seed=args.split_seed,
-    )
-
     final_pairs: list[dict[str, Any]] = []
     for pair in pair_candidates:
         testcase_key = pair["testcase_key"]
         pair_id = pair["pair_id"]
-        dataset_type = split_map[testcase_key]
         b2b_record: StrictTraceRecord = pair["b2b"]
         counterpart_record: StrictTraceRecord = pair["counterpart"]
 
@@ -372,7 +329,6 @@ def main() -> int:
         b2b_export["pairing_meta"] = {
             "pair_id": pair_id,
             "testcase_key": testcase_key,
-            "dataset_type": dataset_type,
             "role": "b2b",
             "selection_reason": pair["selection_reason"],
             "trace_file": str(b2b_record.trace_file),
@@ -383,7 +339,6 @@ def main() -> int:
         counterpart_export["pairing_meta"] = {
             "pair_id": pair_id,
             "testcase_key": testcase_key,
-            "dataset_type": dataset_type,
             "role": "counterpart",
             "selection_reason": pair["selection_reason"],
             "trace_file": str(counterpart_record.trace_file),
@@ -404,7 +359,6 @@ def main() -> int:
             {
                 "pair_id": pair_id,
                 "testcase_key": testcase_key,
-                "dataset_type": dataset_type,
                 "selection_reason": pair["selection_reason"],
                 "b2b_flow_type": b2b_record.best_flow_type,
                 "b2b_trace_file": str(b2b_record.trace_file),
@@ -429,30 +383,6 @@ def main() -> int:
         for record in leftovers:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    split_manifest = {
-        "trace_jsonl": str(trace_jsonl),
-        "output_dir": str(output_dir),
-        "paired_signatures_dir": str(paired_signatures_dir),
-        "run_dir": str(run_dir) if run_dir else None,
-        "split_unit": "testcase",
-        "train_ratio": args.train_ratio,
-        "test_ratio": round(1.0 - args.train_ratio, 6),
-        "seed": args.split_seed,
-        "counts": {
-            "paired_testcases": len(final_pairs),
-            "train_val": sum(1 for v in split_map.values() if v == "train_val"),
-            "test": sum(1 for v in split_map.values() if v == "test"),
-        },
-        "testcases": {
-            "train_val": sorted(k for k, v in split_map.items() if v == "train_val"),
-            "test": sorted(k for k, v in split_map.items() if v == "test"),
-        },
-    }
-    split_manifest_json.write_text(
-        json.dumps(split_manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
     summary_payload = {
         "trace_jsonl": str(trace_jsonl),
         "output_dir": str(output_dir),
@@ -460,7 +390,6 @@ def main() -> int:
         "run_dir": str(run_dir) if run_dir else None,
         "pairs_jsonl": str(pairs_jsonl),
         "leftover_counterparts_jsonl": str(leftovers_jsonl),
-        "split_manifest_json": str(split_manifest_json),
         "records_total": len(strict_records),
         "summary_counts": dict(summary_counter),
         "paired_testcases": len(final_pairs),
