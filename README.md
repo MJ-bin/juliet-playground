@@ -1,14 +1,21 @@
 # juliet-playground
 
-Juliet C/C++ 테스트 스위트에 대해 Infer를 실행하고, 결과에서 signature를 생성/필터링하는 실험 저장소입니다.
+Juliet C/C++ 테스트 스위트에 대해 Infer를 실행하고, signature를 추출/필터링하고,
+paired trace → slice → dataset export까지 이어지는 실험 저장소입니다.
 
-## ToC
+## 문서 안내
 
-- [Quick Start](#quick-start)
-- [결과 위치](#결과-위치)
-- [스크립트 소개](#스크립트-소개)
-- [그 외 자주 쓰는 명령어](#그-외-자주-쓰는-명령어)
-- [메모](#메모)
+- 운영 가이드 / 산출물 구조 / 재실행 주의사항:
+  [`docs/pipeline-runbook.md`](docs/pipeline-runbook.md)
+- Step 01 (`manifest -> with_comments`):
+  [`experiments/epic001_manifest_comment_scan/README.md`](experiments/epic001_manifest_comment_scan/README.md)
+- Step 02a (`with_comments -> taint config`):
+  [`experiments/epic001a_code_field_inventory/README.md`](experiments/epic001a_code_field_inventory/README.md)
+- Step 02b (`function inventory / flow xml`):
+  [`experiments/epic001b_function_inventory/README.md`](experiments/epic001b_function_inventory/README.md),
+  [`experiments/epic001c_testcase_flow_partition/README.md`](experiments/epic001c_testcase_flow_partition/README.md)
+- Step 04 (`trace flow filter`):
+  [`experiments/epic001d_trace_flow_filter/README.md`](experiments/epic001d_trace_flow_filter/README.md)
 
 ## Quick Start
 
@@ -25,7 +32,7 @@ cd /tmp && curl -fL -o infer-linux-x86_64-v1.2.0.tar.xz https://github.com/faceb
 cd /home/sojeon/Desktop/juliet-playground && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
-### 2) 단일 infer 실행
+### 2) 단일 Infer 실행
 
 ```bash
 source .venv/bin/activate && python tools/run-infer-all-juliet.py 78
@@ -43,95 +50,54 @@ source .venv/bin/activate && python tools/run-epic001-pipeline.py 78
 source .venv/bin/activate && python tools/run-epic001-pipeline.py --all
 ```
 
-기본 run-id 규칙은 `run-YYYY.MM.DD-HH:MM:SS` 이며,
+기본 run-id 규칙은 `run-YYYY.MM.DD-HH:MM:SS`이며,
 실제 경로는 `artifacts/pipeline-runs/run-.../` 입니다.
 
-## 결과 위치
+## 파이프라인 개요
+
+`tools/run-epic001-pipeline.py`는 아래 단계를 순서대로 실행합니다.
+
+1. `01_manifest`: manifest에 Juliet 주석 매핑
+2. `02a_taint`: code inventory / 함수 후보 추출 / pulse taint config 생성
+3. `02b_flow`: 함수 inventory 분류 + testcase별 flow XML 생성
+4. `03_infer-results`, `03_signatures`: Infer 실행과 signature 생성
+5. `04_trace_flow`: trace와 testcase flow 매칭
+6. `05_pair_trace_ds`: strict trace에서 `b2b` / counterpart pair 선택
+7. `06_slices`: pair signature의 bug trace를 소스 slice로 변환
+8. `07_dataset_export`: normalize / dedup / token filtering / split / CSV export
+9. `07b`: train patched counterpart 평가용 export 추가 생성
+
+## 결과 위치 (요약)
 
 ```text
 artifacts/
 ├── infer-results/
 │   └── infer-YYYY.MM.DD-HH:MM:SS/
 │       ├── CWE.../infer-out/
-│       └── analysis/
-│           ├── no_issue_files.txt
-│           └── result.csv
+│       └── analysis/{result.csv,no_issue_files.txt}
 ├── signatures/
 │   └── infer-YYYY.MM.DD-HH:MM:SS/
 │       └── signature-YYYY.MM.DD-HH:MM:SS/
-│           ├── non_empty/
-│           │   ├── CWE.../*.json                 # bug_trace non-empty signature
-│           │   └── analysis/signature_counts.csv # CWE별 통계 + TOTAL
-│           └── flow_matched/                     # placeholder (추후 생성)
+│           └── non_empty/CWE.../*.json
 └── pipeline-runs/
     └── run-YYYY.MM.DD-HH:MM:SS/
-        ├── 01_manifest/manifest_with_comments.xml
-        ├── 02a_taint/pulse-taint-config.json
-        ├── 02b_flow/manifest_with_testcase_flows.xml
+        ├── 01_manifest/
+        ├── 02a_taint/
+        ├── 02b_flow/
         ├── 03_infer-results/
         ├── 03_signatures/
-        ├── 04_trace_flow/trace_flow_match_strict.jsonl
+        ├── 04_trace_flow/
         ├── 05_pair_trace_ds/
-        │   ├── pairs.jsonl
-        │   ├── leftover_counterparts.jsonl
-        │   ├── paired_signatures/<testcase_key>/{b2b.json,g2b.json,...}
-        │   ├── train_patched_counterparts_pairs.jsonl
-        │   └── train_patched_counterparts_signatures/<testcase_key>/{b2b.json,g2b.json,...}
         ├── 06_slices/
-        │   ├── slice/*.c|*.cpp
-        │   ├── summary.json
-        │   └── train_patched_counterparts/slice/*.c|*.cpp
         ├── 07_dataset_export/
-        │   ├── normalized_slices/*.c|*.cpp
-        │   ├── Real_Vul_data.csv
-        │   ├── Real_Vul_data_dedup_dropped.csv
-        │   ├── normalized_token_counts.csv
-        │   ├── slice_token_distribution.png
-        │   ├── split_manifest.json
-        │   ├── summary.json
-        │   ├── train_patched_counterparts.csv
-        │   ├── train_patched_counterparts_dedup_dropped.csv
-        │   └── train_patched_counterparts_slices/*.c|*.cpp
+        ├── logs/
         └── run_summary.json
 ```
 
-## 스크립트 소개
+전체 산출물 트리와 각 파일 의미는
+[`docs/pipeline-runbook.md`](docs/pipeline-runbook.md)를 참고하세요.
 
-- **Infer 실행**: `tools/run-infer-all-juliet.py`
-  - CWE 단위/파일 단위로 Juliet 테스트케이스를 실행
-  - `issue / no_issue / error` 집계, `analysis/result.csv`, `analysis/no_issue_files.txt` 생성
-  - infer 실행 후 signature도 생성
-  - 옵션: `--all`, `--files`, `--pulse-taint-config`, `--infer-results-root`, `--signatures-root`, `--summary-json`
-- **Signature 생성**: `tools/generate-signature.py`
-  - `infer-out/report.json`에서 `bug_trace`가 있는 이슈를 `non_empty/`에 JSON으로 분리 저장
-  - `non_empty/analysis/signature_counts.csv`에 CWE별 통계 저장
-- **통합 파이프라인**: `tools/run-epic001-pipeline.py`
-  - `manifest -> with_comments -> taint config -> flow xml -> infer/signature -> trace_flow_filter -> paired_trace_ds -> slices -> dataset_export`
-  - 실행별 산출물을 `artifacts/pipeline-runs/...`에 분리 저장
-  - 타깃 지정: `CWE 번호들` / `--all` / `--files ...`
-- **Paired trace dataset 생성**: `tools/build-paired-trace-signatures.py`
-  - `trace_flow_match_strict.jsonl`에서 testcase별 `b2b` / 대응 trace를 1:1로 선택
-  - 대응 후보가 여러 개면 `bug_trace_length`가 가장 긴 trace를 선택하고 나머지는 별도 보관
-  - `paired_signatures/<testcase_key>/b2b.json`, `g2b.json` 등의 형태로 출력
-- **Slice 생성**: `tools/generate_slices.py`
-  - `paired_signatures`의 `bug_trace`에서 소스 라인만 모아 슬라이스 생성
-  - `.c`는 `.c`, C++ trace는 `.cpp`로 저장
-- **Dataset export (pipeline 내장)**: `tools/run-epic001-pipeline.py`
-  - 06에서 만든 slice를 기준으로 사용자 정의 함수명만 normalize
-  - normalize 후 공백 무시 MD5(`md5("".join(code.split()))`) 기준으로 row-level dedup 수행
-  - dedup 이후 CodeBERT 토큰 수를 재계산하고 pair 단위로 510 토큰 이하만 필터링/분할
-  - `Real_Vul_data.csv`에 `source_signature_path` 칼럼을 추가해 row 출처 추적 가능
-  - dedup으로 제거된 row/pair는 `Real_Vul_data_dedup_dropped.csv`로 별도 저장
-  - `normalized_slices/`, 히스토그램/CSV를 생성
-- **Train patched counterpart export**: `tools/export_train_patched_counterparts.py`
-  - 기존 `07_dataset_export/split_manifest.json`에서 `train_val`로 사용된 pair만 대상으로 함
-  - `leftover_counterparts.jsonl`에서 testcase별 최상위 leftover counterpart 1개를 골라 평가용 데이터셋 생성
-  - base export와 동일하게 normalized slice 기준 dedup 가능 (`--dedup-mode`)
-  - `train_patched_counterparts.csv`에도 `source_signature_path` 칼럼을 추가
-  - dedup으로 제거된 row/pair는 `train_patched_counterparts_dedup_dropped.csv`로 별도 저장
-  - `train_patched_counterparts_slices/`, 관련 summary/manifest를 생성
-
-## 그 외 자주 쓰는 명령어
+## 대표 명령어
 
 ```bash
 # Infer만 빠르게 실행
@@ -143,57 +109,26 @@ python tools/run-infer-all-juliet.py --files juliet-test-suite-v1.3/C/testcases/
 # 기존 infer 결과에서 signature만 생성
 python tools/generate-signature.py --input-dir artifacts/infer-results/infer-2026.03.08-18:04:18
 
-# 통합 파이프라인 (CWE 여러개)
+# 통합 파이프라인
 python tools/run-epic001-pipeline.py 78 89
 
-# 통합 파이프라인 (전체 CWE)
-python tools/run-epic001-pipeline.py --all
-
-# strict trace 결과만으로 paired trace dataset 생성
-python tools/build-paired-trace-signatures.py \
-  --trace-jsonl artifacts/pipeline-runs/run-2026.03.09-22:18:32/04_trace_flow/trace_flow_match_strict.jsonl \
-  --output-dir /tmp/paired-trace-ds
-
-# 옵션 없이 실행하면 최신 pipeline run의 strict trace를 찾아
-# 같은 run 아래 05_pair_trace_ds/ 로 출력
+# strict trace 결과에서 paired trace dataset만 생성
 python tools/build-paired-trace-signatures.py
 
-# paired_signatures 로부터 slice 생성
-python tools/generate_slices.py \
-  --signature-db-dir artifacts/pipeline-runs/run-2026.03.09-22:18:32/05_pair_trace_ds/paired_signatures \
-  --output-dir /tmp/paired-slices
-
-# 옵션 없이 실행하면 최신 pipeline run의 paired_signatures 를 찾아
-# 같은 run 아래 06_slices/ 로 출력
-python tools/generate_slices.py
-
-# 기존 train_val 샘플들에 대응하는 patched counterpart 평가셋 생성
-python tools/export_train_patched_counterparts.py \
-  --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21
-
-# 기존 run의 Step 07 + 07b를 새 timestamped 폴더로 다시 생성 (기본)
-python tools/rerun-step07.py \
-  --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21
-
-# Step 07만 다시 생성
-python tools/rerun-step07.py \
-  --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21 \
-  --only-07
-
-# Step 07b(train patched counterparts)만 다시 생성
-# (기본은 기존 07_dataset_export를 사용하므로, 새 Step 07 결과에 붙이려면 --output-dir 지정)
-python tools/rerun-step07.py \
-  --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21 \
-  --overwrite \
-  --only-07b
+# 기존 run의 Step 07 + 07b 재생성
+python tools/rerun-step07.py --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21
 ```
+
+추가 명령 예시와 재실행 패턴은 runbook에 정리되어 있습니다.
 
 ## 메모
 
-- `.cpp`는 `clang++`, `.c`는 `clang` 사용
-- `--files` 사용 시 `cwes` / `--all` 은 무시
-- `--all` 사용 시 `cwes` 인자는 무시
-- Juliet 파일명 규칙 기반으로 같은 flow variant 그룹을 함께 컴파일
-- Pulse taint 기준 설정: `config/pulse-taint-config.json`
-- 파이프라인 생성 taint config: `.../02a_taint/pulse-taint-config.json` (수동 승격 대상)
-- 개별 experiments 스크립트 실행 시에는 기존 `experiments/*/outputs`를 그대로 사용
+- `tools/generate-signature.py`는 `infer-out/report.json`의 모든 이슈를 저장하지 않습니다.
+  `bug_type == TAINT_ERROR`이면서 `bug_trace`가 non-empty인 레코드만 signature로 저장합니다.
+- `--files` 사용 시 `cwes` / `--all`은 무시됩니다.
+- `--all` 사용 시 positional `cwes` 인자는 무시됩니다.
+- `.cpp`는 `clang++`, `.c`는 `clang`을 사용합니다.
+- `run-infer-all-juliet.py --global-result`를 쓰면 infer 결과 root가
+  로컬 `artifacts/infer-results/` 대신 `/data/pattern/result/infer-results/`로 바뀝니다.
+- CodeBERT tokenizer 캐시, `--overwrite`, `--old-prefix/--new-prefix`,
+  `rerun-step07.py`의 suffix 규칙, 재현성 옵션은 runbook을 참고하세요.
