@@ -4,3 +4,6 @@ tree_sitter_languages==1.10.2
 transformers
 scienceplots
 matplotlib
+pytest
+ruff
+pre-commit

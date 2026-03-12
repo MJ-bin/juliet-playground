@@ -36,6 +36,21 @@ cd /tmp && curl -fL -o infer-linux-x86_64-v1.2.0.tar.xz https://github.com/faceb
 cd /home/sojeon/Desktop/juliet-playground && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
+### 개발 체크
+
+```bash
+# 개발용 git hook 설치
+source .venv/bin/activate && pre-commit install
+
+# 수동 검사
+source .venv/bin/activate && ruff format .
+source .venv/bin/activate && ruff check .
+source .venv/bin/activate && pytest -q
+
+# pre-commit 훅 전체 실행
+source .venv/bin/activate && pre-commit run --all-files
+```
+
 ### 2) 단일 Infer 실행
 
 ```bash
