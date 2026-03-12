@@ -5,8 +5,12 @@ paired trace → slice → dataset export까지 이어지는 실험 저장소입
 
 ## 문서 안내
 
-- 운영 가이드 / 산출물 구조 / 재실행 주의사항:
+- 운영 문서 인덱스:
   [`docs/pipeline-runbook.md`](docs/pipeline-runbook.md)
+- 산출물 구조 / summary JSON / 로그 위치:
+  [`docs/artifacts.md`](docs/artifacts.md)
+- 재실행 / `--overwrite` / 경로 이식 / 재현성 옵션:
+  [`docs/rerun.md`](docs/rerun.md)
 - Step 01 (`manifest -> with_comments`):
   [`experiments/epic001_manifest_comment_scan/README.md`](experiments/epic001_manifest_comment_scan/README.md)
 - Step 02a (`with_comments -> taint config`):
@@ -95,7 +99,7 @@ artifacts/
 ```
 
 전체 산출물 트리와 각 파일 의미는
-[`docs/pipeline-runbook.md`](docs/pipeline-runbook.md)를 참고하세요.
+[`docs/artifacts.md`](docs/artifacts.md)를 참고하세요.
 
 ## 대표 명령어
 
@@ -119,7 +123,7 @@ python tools/build-paired-trace-signatures.py
 python tools/rerun-step07.py --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21
 ```
 
-추가 명령 예시와 재실행 패턴은 runbook에 정리되어 있습니다.
+추가 명령 예시와 재실행 패턴은 [`docs/rerun.md`](docs/rerun.md)에 정리되어 있습니다.
 
 ## 메모
 
@@ -131,4 +135,4 @@ python tools/rerun-step07.py --run-dir artifacts/pipeline-runs/run-2026.03.10-00
 - `run-infer-all-juliet.py --global-result`를 쓰면 infer 결과 root가
   로컬 `artifacts/infer-results/` 대신 `/data/pattern/result/infer-results/`로 바뀝니다.
 - CodeBERT tokenizer 캐시, `--overwrite`, `--old-prefix/--new-prefix`,
-  `rerun-step07.py`의 suffix 규칙, 재현성 옵션은 runbook을 참고하세요.
+  `rerun-step07.py`의 suffix 규칙, 재현성 옵션은 [`docs/rerun.md`](docs/rerun.md)를 참고하세요.
