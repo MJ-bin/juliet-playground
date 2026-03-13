@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,7 @@ from typing import Any
 from generate_slices import process_signature_db
 from paths import PROJECT_HOME, RESULT_DIR
 
+from lib import fs_utils as _fs_utils
 from lib import step07_shared as _step07_shared
 
 CPP_LIKE_SUFFIXES = {'.cpp', '.cc', '.cxx', '.c++', '.hpp', '.hh', '.hxx'}
@@ -19,64 +19,27 @@ ROLE_SORT_ORDER = {'b2b': 0, 'counterpart': 1}
 DATASET_BASENAME = 'train_patched_counterparts'
 PROJECT_HOME_PATH = Path(PROJECT_HOME).resolve()
 
-
-def normalize_artifact_path(path: Path | str) -> str:
-    raw = str(path or '').strip()
-    if not raw:
-        return ''
-    candidate = Path(raw)
-    if not candidate.is_absolute():
-        return str(candidate)
-    resolved = candidate.resolve()
-    try:
-        return str(resolved.relative_to(PROJECT_HOME_PATH))
-    except ValueError:
-        return str(resolved)
-
-
-def unique_in_order(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
-
-
-def build_dedup_audit_row(
-    *,
-    record: dict[str, Any],
-    dedup_reason: str,
-    dedup_trigger_hashes: list[str],
-    matched_kept_record: dict[str, Any] | None,
-) -> dict[str, Any]:
-    return {
-        'pair_id': str(record['pair_id']),
-        'testcase_key': str(record['testcase_key']),
-        'role': str(record['role']),
-        'role_name': str(record['role_name']),
-        'target': int(record['target']),
-        'project': 'Juliet',
-        'source_signature_path': str(record.get('source_signature_path') or ''),
-        'normalized_code_hash': str(record.get('normalized_code_hash') or ''),
-        'dedup_reason': dedup_reason,
-        'dedup_trigger_hashes': '|'.join(dedup_trigger_hashes),
-        'matched_kept_pair_id': str(matched_kept_record.get('pair_id') or '')
-        if matched_kept_record
-        else '',
-        'matched_kept_role': str(matched_kept_record.get('role') or '')
-        if matched_kept_record
-        else '',
-        'matched_kept_source_signature_path': (
-            str(matched_kept_record.get('source_signature_path') or '')
-            if matched_kept_record
-            else ''
-        ),
-        'matched_kept_unique_id': '',
-        'processed_func': str(record['normalized_code']),
-    }
+normalize_artifact_path = _step07_shared.normalize_artifact_path
+unique_in_order = _step07_shared.unique_in_order
+build_dedup_audit_row = _step07_shared.build_dedup_audit_row
+extract_std_bug_trace = _step07_shared.extract_std_bug_trace
+load_tree_sitter_parsers = _step07_shared.load_tree_sitter_parsers
+candidate_languages_for_source = _step07_shared.candidate_languages_for_source
+node_text = _step07_shared.node_text
+extract_function_name_from_declarator = _step07_shared.extract_function_name_from_declarator
+extract_defined_function_names = _step07_shared.extract_defined_function_names
+dedupe_paths = _step07_shared.dedupe_paths
+build_source_file_candidates = _step07_shared.build_source_file_candidates
+lex_c_like = _step07_shared.lex_c_like
+previous_meaningful_token = _step07_shared.previous_meaningful_token
+next_meaningful_token = _step07_shared.next_meaningful_token
+normalize_slice_function_names = _step07_shared.normalize_slice_function_names
+find_slice_path = _step07_shared.find_slice_path
+compact_code_for_hash = _step07_shared.compact_code_for_hash
+normalized_code_md5 = _step07_shared.normalized_code_md5
+dedupe_pairs_by_normalized_rows = _step07_shared.dedupe_pairs_by_normalized_rows
+prepare_target = _fs_utils.prepare_target
+remove_target = _fs_utils.remove_target
 
 
 def parse_args() -> argparse.Namespace:
@@ -234,22 +197,6 @@ def validate_args(args: argparse.Namespace, paths: dict[str, Path | None]) -> No
         raise NotADirectoryError(f'Dataset export dir is not a directory: {dataset_export_dir}')
     if bool(args.old_prefix) != bool(args.new_prefix):
         raise ValueError('--old-prefix and --new-prefix must be provided together.')
-
-
-def remove_target(path: Path) -> None:
-    if path.is_dir():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
-
-def prepare_target(path: Path, overwrite: bool) -> None:
-    if path.exists():
-        if not overwrite:
-            raise FileExistsError(
-                f'Target already exists: {path}. Re-run with --overwrite to replace it.'
-            )
-        remove_target(path)
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -503,92 +450,6 @@ def build_train_patched_counterparts(
     }
 
 
-def extract_std_bug_trace(bug_trace: Any) -> list[dict[str, Any]]:
-    if not isinstance(bug_trace, list) or not bug_trace:
-        return []
-    first = bug_trace[0]
-    if isinstance(first, dict):
-        return [node for node in bug_trace if isinstance(node, dict)]
-    if isinstance(first, list):
-        valid_lists = [sub for sub in bug_trace if isinstance(sub, list)]
-        if not valid_lists:
-            return []
-        selected = max(valid_lists, key=len)
-        return [node for node in selected if isinstance(node, dict)]
-    return []
-
-
-def load_tree_sitter_parsers() -> dict[str, object]:
-    try:
-        from tree_sitter import Parser
-        from tree_sitter_languages import get_language
-    except Exception:
-        return {}
-
-    parsers: dict[str, object] = {}
-    for language_name in ('c', 'cpp'):
-        parser = Parser()
-        lang = get_language(language_name)
-        if hasattr(parser, 'set_language'):
-            parser.set_language(lang)
-        else:
-            parser.language = lang
-        parsers[language_name] = parser
-    return parsers
-
-
-def candidate_languages_for_source(path: Path) -> list[str]:
-    suffix = path.suffix.lower()
-    if suffix in CPP_LIKE_SUFFIXES:
-        return ['cpp', 'c']
-    return ['c', 'cpp']
-
-
-def node_text(node, source_bytes: bytes) -> str:
-    return source_bytes[node.start_byte : node.end_byte].decode('utf-8', errors='ignore')
-
-
-def extract_function_name_from_declarator(node, source_bytes: bytes) -> str | None:
-    if node is None:
-        return None
-
-    current = node
-    for _ in range(12):
-        next_node = current.child_by_field_name('declarator')
-        if next_node is None:
-            break
-        current = next_node
-
-    if current.type in {'identifier', 'field_identifier'}:
-        return node_text(current, source_bytes)
-
-    name_node = current.child_by_field_name('name')
-    if name_node is not None and name_node.type in {'identifier', 'field_identifier'}:
-        return node_text(name_node, source_bytes)
-
-    stack = [current]
-    while stack:
-        candidate = stack.pop()
-        if candidate.type in {'identifier', 'field_identifier'}:
-            return node_text(candidate, source_bytes)
-        stack.extend(reversed(candidate.children))
-    return None
-
-
-def extract_defined_function_names(root_node, source_bytes: bytes) -> set[str]:
-    names: set[str] = set()
-    stack = [root_node]
-    while stack:
-        node = stack.pop()
-        if node.type == 'function_definition':
-            declarator = node.child_by_field_name('declarator')
-            name = extract_function_name_from_declarator(declarator, source_bytes)
-            if name:
-                names.add(name)
-        stack.extend(reversed(node.children))
-    return names
-
-
 def collect_defined_function_names(
     source_path: Path, parsers: dict[str, object]
 ) -> tuple[set[str], str | None]:
@@ -611,339 +472,6 @@ def collect_defined_function_names(
     if not parsers:
         return set(), 'parser_unavailable'
     return set(), last_error or 'parse_failed'
-
-
-def dedupe_paths(paths: list[Path]) -> list[Path]:
-    deduped: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        key = str(path)
-        if key in seen:
-            continue
-        deduped.append(path)
-        seen.add(key)
-    return deduped
-
-
-def build_source_file_candidates(
-    signature_payload: dict[str, Any], primary_file_hint: str | None
-) -> list[Path]:
-    candidates: list[Path] = []
-
-    bug_trace = extract_std_bug_trace(signature_payload.get('bug_trace', []))
-    for node in bug_trace:
-        filename = node.get('filename')
-        if filename:
-            candidates.append(Path(str(filename)))
-
-    top_file_raw = signature_payload.get('file')
-    top_file_path: Path | None = None
-    if top_file_raw:
-        top_file_path = Path(str(top_file_raw))
-        candidates.append(top_file_path)
-
-    if primary_file_hint:
-        primary_path = Path(primary_file_hint)
-        if primary_path.is_absolute():
-            candidates.append(primary_path)
-        else:
-            basename = primary_path.name
-            matches = [path for path in candidates if path.name == basename]
-            if matches:
-                candidates.extend(matches)
-            elif top_file_path is not None:
-                candidates.append(top_file_path.parent / basename)
-
-    return dedupe_paths(candidates)
-
-
-def lex_c_like(code: str) -> list[dict[str, str]]:
-    tokens: list[dict[str, str]] = []
-    i = 0
-    n = len(code)
-
-    while i < n:
-        ch = code[i]
-
-        if ch.isspace():
-            j = i + 1
-            while j < n and code[j].isspace():
-                j += 1
-            tokens.append({'kind': 'ws', 'text': code[i:j]})
-            i = j
-            continue
-
-        if code.startswith('//', i):
-            j = i + 2
-            while j < n and code[j] != '\n':
-                j += 1
-            tokens.append({'kind': 'comment', 'text': code[i:j]})
-            i = j
-            continue
-
-        if code.startswith('/*', i):
-            j = i + 2
-            while j < n - 1 and code[j : j + 2] != '*/':
-                j += 1
-            j = min(n, j + 2 if j < n - 1 else n)
-            tokens.append({'kind': 'comment', 'text': code[i:j]})
-            i = j
-            continue
-
-        if ch == '"':
-            j = i + 1
-            while j < n:
-                if code[j] == '\\':
-                    j += 2
-                    continue
-                if code[j] == '"':
-                    j += 1
-                    break
-                j += 1
-            tokens.append({'kind': 'string', 'text': code[i:j]})
-            i = j
-            continue
-
-        if ch == "'":
-            j = i + 1
-            while j < n:
-                if code[j] == '\\':
-                    j += 2
-                    continue
-                if code[j] == "'":
-                    j += 1
-                    break
-                j += 1
-            tokens.append({'kind': 'char', 'text': code[i:j]})
-            i = j
-            continue
-
-        if ch.isalpha() or ch == '_':
-            j = i + 1
-            while j < n and (code[j].isalnum() or code[j] == '_'):
-                j += 1
-            tokens.append({'kind': 'identifier', 'text': code[i:j]})
-            i = j
-            continue
-
-        if code.startswith('->', i) or code.startswith('::', i):
-            tokens.append({'kind': 'punct', 'text': code[i : i + 2]})
-            i += 2
-            continue
-
-        tokens.append({'kind': 'punct', 'text': ch})
-        i += 1
-
-    return tokens
-
-
-def previous_meaningful_token(tokens: list[dict[str, str]], index: int) -> dict[str, str] | None:
-    for j in range(index - 1, -1, -1):
-        token = tokens[j]
-        if token['kind'] in {'ws', 'comment'}:
-            continue
-        return token
-    return None
-
-
-def next_meaningful_token(tokens: list[dict[str, str]], index: int) -> dict[str, str] | None:
-    for j in range(index + 1, len(tokens)):
-        token = tokens[j]
-        if token['kind'] in {'ws', 'comment'}:
-            continue
-        return token
-    return None
-
-
-def normalize_slice_function_names(
-    code: str, user_defined_function_names: set[str]
-) -> tuple[str, dict[str, str], int]:
-    if not user_defined_function_names:
-        return code, {}, 0
-
-    tokens = lex_c_like(code)
-    placeholder_map: dict[str, str] = {}
-    replacements = 0
-
-    for idx, token in enumerate(tokens):
-        if token['kind'] != 'identifier':
-            continue
-        name = token['text']
-        if name not in user_defined_function_names:
-            continue
-
-        prev_token = previous_meaningful_token(tokens, idx)
-        next_token = next_meaningful_token(tokens, idx)
-
-        if next_token is None or next_token['text'] != '(':
-            continue
-        if prev_token is not None and prev_token['text'] in {'.', '->', '::'}:
-            continue
-
-        placeholder = placeholder_map.get(name)
-        if placeholder is None:
-            placeholder = f'FUNC_{len(placeholder_map) + 1}'
-            placeholder_map[name] = placeholder
-        if token['text'] != placeholder:
-            token['text'] = placeholder
-            replacements += 1
-
-    return ''.join(token['text'] for token in tokens), placeholder_map, replacements
-
-
-def find_slice_path(slice_dir: Path, testcase_key: str, role_name: str) -> Path | None:
-    candidates = [
-        slice_dir / f'slice_{testcase_key}_{role_name}.c',
-        slice_dir / f'slice_{testcase_key}_{role_name}.cpp',
-    ]
-    existing = [path for path in candidates if path.exists()]
-    if len(existing) > 1:
-        raise RuntimeError(
-            f'Multiple slice candidates found for {testcase_key}/{role_name}: {existing}'
-        )
-    return existing[0] if existing else None
-
-
-def compact_code_for_hash(code: str) -> str:
-    return ''.join(str(code).split())
-
-
-def normalized_code_md5(code: str) -> str:
-    return hashlib.md5(compact_code_for_hash(code).encode('utf-8')).hexdigest()
-
-
-def dedupe_pairs_by_normalized_rows(
-    *,
-    surviving_pairs: dict[str, list[dict[str, Any]]],
-    filtered_pair_reasons: Counter,
-    dedup_mode: str,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[dict[str, Any]]]:
-    if dedup_mode not in {'none', 'row'}:
-        raise ValueError(f'Unsupported dedup_mode: {dedup_mode}')
-
-    ordered_pair_ids = list(surviving_pairs.keys())
-    row_occurrences: dict[str, list[dict[str, Any]]] = {}
-    label_by_hash: dict[str, int] = {}
-    colliding_hashes: set[str] = set()
-    rows_before = 0
-
-    for pair_id in ordered_pair_ids:
-        pair_records = sorted(
-            surviving_pairs[pair_id],
-            key=lambda row: ROLE_SORT_ORDER.get(str(row['role']), 99),
-        )
-        for record in pair_records:
-            code_hash = normalized_code_md5(str(record['normalized_code']))
-            record['normalized_code_hash'] = code_hash
-            target = int(record['target'])
-            rows_before += 1
-            row_occurrences.setdefault(code_hash, []).append(
-                {
-                    'pair_id': pair_id,
-                    'testcase_key': str(record['testcase_key']),
-                    'role': str(record['role']),
-                    'target': target,
-                }
-            )
-            old_target = label_by_hash.get(code_hash)
-            if old_target is None:
-                label_by_hash[code_hash] = target
-            elif old_target != target:
-                colliding_hashes.add(code_hash)
-
-    duplicate_hash_groups = 0
-    duplicate_row_occurrences = 0
-    for code_hash, occurrences in row_occurrences.items():
-        if code_hash in colliding_hashes:
-            continue
-        if len(occurrences) > 1:
-            duplicate_hash_groups += 1
-            duplicate_row_occurrences += len(occurrences) - 1
-
-    collision_row_occurrences = sum(
-        len(row_occurrences[code_hash]) for code_hash in colliding_hashes
-    )
-
-    if dedup_mode == 'none':
-        deduped_pairs = surviving_pairs
-        pairs_dropped_duplicate = 0
-        pairs_dropped_collision = 0
-        dedup_audit_rows: list[dict[str, Any]] = []
-    else:
-        deduped_pairs: dict[str, list[dict[str, Any]]] = {}
-        dedup_audit_rows = []
-        kept_record_by_hash: dict[str, dict[str, Any]] = {}
-        seen_hashes: set[str] = set()
-        pairs_dropped_duplicate = 0
-        pairs_dropped_collision = 0
-
-        for pair_id in ordered_pair_ids:
-            pair_records = sorted(
-                surviving_pairs[pair_id],
-                key=lambda row: ROLE_SORT_ORDER.get(str(row['role']), 99),
-            )
-            pair_hashes = [str(record['normalized_code_hash']) for record in pair_records]
-            collision_trigger_hashes = unique_in_order(
-                [code_hash for code_hash in pair_hashes if code_hash in colliding_hashes]
-            )
-            duplicate_trigger_hashes = unique_in_order(
-                [code_hash for code_hash in pair_hashes if code_hash in seen_hashes]
-            )
-
-            if collision_trigger_hashes:
-                filtered_pair_reasons['dedup_row_hash_collision'] += 1
-                pairs_dropped_collision += 1
-                for record in pair_records:
-                    dedup_audit_rows.append(
-                        build_dedup_audit_row(
-                            record=record,
-                            dedup_reason='collision_pair',
-                            dedup_trigger_hashes=collision_trigger_hashes,
-                            matched_kept_record=None,
-                        )
-                    )
-                continue
-            if duplicate_trigger_hashes:
-                filtered_pair_reasons['dedup_duplicate_normalized_slice'] += 1
-                pairs_dropped_duplicate += 1
-                for record in pair_records:
-                    dedup_audit_rows.append(
-                        build_dedup_audit_row(
-                            record=record,
-                            dedup_reason='duplicate_pair',
-                            dedup_trigger_hashes=duplicate_trigger_hashes,
-                            matched_kept_record=kept_record_by_hash.get(
-                                str(record['normalized_code_hash'])
-                            ),
-                        )
-                    )
-                continue
-
-            deduped_pairs[pair_id] = pair_records
-            for record in pair_records:
-                code_hash = str(record['normalized_code_hash'])
-                seen_hashes.add(code_hash)
-                kept_record_by_hash[code_hash] = record
-
-    rows_after = sum(len(records) for records in deduped_pairs.values())
-    dedup_summary = {
-        'mode': dedup_mode,
-        'selection_order': 'input_pair_order',
-        'row_hash_method': 'md5(compact_whitespace(normalized_code))',
-        'pairs_before': len(surviving_pairs),
-        'pairs_after': len(deduped_pairs),
-        'pairs_dropped_duplicate': pairs_dropped_duplicate,
-        'pairs_dropped_collision': pairs_dropped_collision,
-        'rows_before': rows_before,
-        'rows_after': rows_after,
-        'rows_removed': rows_before - rows_after,
-        'row_hashes_unique': len(row_occurrences),
-        'duplicate_hash_groups': duplicate_hash_groups,
-        'duplicate_row_occurrences': duplicate_row_occurrences,
-        'collision_hash_groups': len(colliding_hashes),
-        'collision_row_occurrences': collision_row_occurrences,
-    }
-    return deduped_pairs, dedup_summary, dedup_audit_rows
 
 
 def export_dataset(

@@ -5,13 +5,17 @@ import argparse
 import datetime
 import importlib.util
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from paths import PROJECT_HOME, RESULT_DIR
+
+from lib import fs_utils as _fs_utils
+
+prepare_target = _fs_utils.prepare_target
+remove_target = _fs_utils.remove_target
 
 
 def now_ts_compact() -> str:
@@ -106,22 +110,6 @@ def resolve_run_dir(args: argparse.Namespace) -> Path:
 def validate_args(args: argparse.Namespace) -> None:
     if bool(args.old_prefix) != bool(args.new_prefix):
         raise ValueError('--old-prefix and --new-prefix must be provided together.')
-
-
-def remove_target(path: Path) -> None:
-    if path.is_dir():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
-
-def prepare_target(path: Path, overwrite: bool) -> None:
-    if path.exists():
-        if not overwrite:
-            raise FileExistsError(
-                f'Target already exists: {path}. Re-run with --overwrite to replace it.'
-            )
-        remove_target(path)
 
 
 def load_json(path: Path) -> dict[str, Any]:
