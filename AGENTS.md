@@ -9,7 +9,8 @@ This repository runs Infer on the Juliet C/C++ test suite and maintains the pipe
 
 ## Repository Map
 - `tools/`: user-facing CLI scripts such as `run-epic001-pipeline.py`, `run-infer-all-juliet.py`, and rerun/export helpers.
-- `tools/lib/`: shared pipeline logic. Keep CLI wrappers thin and put reusable behavior here.
+- `tools/stage/`: importable stage implementations for pipeline steps and rerun/export workflows.
+- `tools/shared/`: helper modules shared across stages and CLI entrypoints. Keep CLI wrappers thin and put reusable helper behavior here.
 - `tests/`: unit and regression tests. `tests/golden/` contains stage-level golden fixtures and fixture update tooling.
 - `experiments/`: stage-specific scripts, inputs, and notes for the EPIC001 pipeline.
 - `config/`: committed configuration, including `pulse-taint-config.json`.
