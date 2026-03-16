@@ -29,11 +29,11 @@
   "output_dir": "expected/07_dataset_export",
   "pair_ids": {
     "test": [
-      "ef0626e75cfd7623"
+      "f8fb946c5286832a"
     ],
     "train_val": [
-      "5081a705ebecdd3a",
-      "715aeffa5d49925a"
+      "1551f962c530a757",
+      "f32c0e32369bf6cb"
     ]
   },
   "paired_signatures_dir": "expected/05_pair_trace_ds/paired_signatures",

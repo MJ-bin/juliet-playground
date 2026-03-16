@@ -1,2 +1,3 @@
     memset(data, 'A', 100-1); /* fill with 'A's */
-        strncat(dest, data, strlen(data));
+        SNPRINTF(dest, strlen(data), "%s", data);
+#define SNPRINTF snprintf

@@ -42,10 +42,10 @@
   "pairing_meta": {
     "best_flow_type": "b2b",
     "bug_trace_length": 3,
-    "pair_id": "6adccdb259491855",
+    "pair_id": "0b18baf59fcfa24b",
     "role": "b2b",
     "selection_reason": "train_val_primary_pair",
-    "source_primary_pair_id": "ffd83d6053bf99ea",
+    "source_primary_pair_id": "fa37df710e294627",
     "testcase_key": "CWE121_14-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_snprintf",
     "trace_file": "expected/03_signatures_non_empty/CWE121_14-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_snprintf/3.json"
   },

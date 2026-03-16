@@ -44,10 +44,10 @@
     "bug_trace_length": 3,
     "leftover_candidates_total": 3,
     "leftover_rank": 1,
-    "pair_id": "6adccdb259491855",
+    "pair_id": "0b18baf59fcfa24b",
     "role": "counterpart",
     "selection_reason": "top_leftover_train_val",
-    "source_primary_pair_id": "ffd83d6053bf99ea",
+    "source_primary_pair_id": "fa37df710e294627",
     "testcase_key": "CWE121_14-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_snprintf",
     "trace_file": "expected/03_signatures_non_empty/CWE121_14-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_snprintf/20.json"
   },

@@ -27,26 +27,6 @@ SELECTED_TESTCASE_KEYS = [
     'CWE121_43-CWE121_Stack_Based_Buffer_Overflow__src_char_declare_cat',
 ]
 
-EXPECTED_PRIMARY_PAIR_IDS = [
-    '00cbd53f9833d289',
-    '066531ee1975e596',
-    '0eacd5b75217911f',
-    '15654d4cde74cd87',
-    '5d00adb1a8bb3f92',
-]
-
-EXPECTED_PATCHED_PAIR_IDS = [
-    '96287c035b801e53',
-    'c569d11f7550b8ca',
-    'c91162a5acaea404',
-]
-
-EXPECTED_PATCHED_SOURCE_PRIMARY_PAIR_IDS = [
-    '5d00adb1a8bb3f92',
-    '0eacd5b75217911f',
-    '15654d4cde74cd87',
-]
-
 PATCHED_SOURCE_TESTCASE_KEYS = [
     'CWE121_01-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_snprintf',
     'CWE121_06-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_ncat',

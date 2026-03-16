@@ -31,8 +31,8 @@
   "pair_ids": {
     "test": [],
     "train_val": [
-      "9fdbc1aa84f18e77",
-      "fb989951031ec588"
+      "24dd6402817e5ef0",
+      "4b356ae87ad86bf4"
     ]
   },
   "paired_signatures_dir": "expected/05_pair_trace_ds/train_patched_counterparts_signatures",

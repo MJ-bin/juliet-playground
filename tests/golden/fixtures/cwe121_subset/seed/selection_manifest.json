@@ -2,16 +2,16 @@
   "baseline_cwe": "CWE121",
   "baseline_run": "artifacts/pipeline-runs/run-2026.03.13-13:56:23",
   "expected_patched_pair_ids": [
-    "96287c035b801e53",
-    "c569d11f7550b8ca",
-    "c91162a5acaea404"
+    "4b356ae87ad86bf4",
+    "24dd6402817e5ef0",
+    "0b18baf59fcfa24b"
   ],
   "expected_primary_pair_ids": [
-    "00cbd53f9833d289",
-    "066531ee1975e596",
-    "0eacd5b75217911f",
-    "15654d4cde74cd87",
-    "5d00adb1a8bb3f92"
+    "f32c0e32369bf6cb",
+    "1551f962c530a757",
+    "1ddbb5add512d983",
+    "fa37df710e294627",
+    "f8fb946c5286832a"
   ],
   "notes": {
     "coverage": [

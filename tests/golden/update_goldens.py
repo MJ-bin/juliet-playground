@@ -19,8 +19,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests.golden.helpers import (  # noqa: E402
     DEFAULT_SOURCE_RUN,
-    EXPECTED_PATCHED_PAIR_IDS,
-    EXPECTED_PRIMARY_PAIR_IDS,
     FIXTURE_ROOT,
     PATCHED_SOURCE_TESTCASE_KEYS,
     SELECTED_TESTCASE_KEYS,
@@ -77,14 +75,26 @@ def ensure_clean_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def build_selection_manifest(source_run: Path) -> dict[str, object]:
+def load_pair_ids(path: Path) -> list[str]:
+    pair_ids: list[str] = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        pair_ids.append(str(obj['pair_id']))
+    return pair_ids
+
+
+def build_selection_manifest(
+    source_run: Path, *, expected_primary_pair_ids: list[str], expected_patched_pair_ids: list[str]
+) -> dict[str, object]:
     return {
         'baseline_run': str(source_run.resolve().relative_to(REPO_ROOT)),
         'baseline_cwe': 'CWE121',
         'selected_testcase_keys': SELECTED_TESTCASE_KEYS,
         'strict_only_testcase_keys': STRICT_ONLY_TESTCASE_KEYS,
-        'expected_primary_pair_ids': EXPECTED_PRIMARY_PAIR_IDS,
-        'expected_patched_pair_ids': EXPECTED_PATCHED_PAIR_IDS,
+        'expected_primary_pair_ids': expected_primary_pair_ids,
+        'expected_patched_pair_ids': expected_patched_pair_ids,
         'patched_source_testcase_keys': PATCHED_SOURCE_TESTCASE_KEYS,
         'notes': {
             'coverage': [
@@ -481,12 +491,6 @@ def main() -> int:
         (temp_root / 'expected').mkdir(parents=True, exist_ok=True)
         link_repo_source_tree(temp_root)
 
-        selection_manifest = build_selection_manifest(source_run)
-        (temp_root / 'seed/selection_manifest.json').write_text(
-            json.dumps(selection_manifest, ensure_ascii=False, indent=2) + '\n',
-            encoding='utf-8',
-        )
-
         manifest_subset = temp_root / 'seed/manifest_subset.xml'
         write_manifest_subset(input_manifest, manifest_subset)
 
@@ -514,6 +518,20 @@ def main() -> int:
         run_stage06(temp_root)
         run_stage07(temp_root)
         run_stage07b(temp_root)
+
+        selection_manifest = build_selection_manifest(
+            source_run,
+            expected_primary_pair_ids=load_pair_ids(
+                temp_root / 'expected/05_pair_trace_ds/pairs.jsonl'
+            ),
+            expected_patched_pair_ids=load_pair_ids(
+                temp_root / 'expected/05_pair_trace_ds/train_patched_counterparts_pairs.jsonl'
+            ),
+        )
+        (temp_root / 'seed/selection_manifest.json').write_text(
+            json.dumps(selection_manifest, ensure_ascii=False, indent=2) + '\n',
+            encoding='utf-8',
+        )
 
         sanitize_tree_in_place(
             temp_root,

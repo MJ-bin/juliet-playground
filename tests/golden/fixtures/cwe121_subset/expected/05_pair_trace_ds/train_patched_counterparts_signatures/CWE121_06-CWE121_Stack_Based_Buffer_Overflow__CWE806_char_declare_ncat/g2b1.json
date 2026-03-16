@@ -37,10 +37,10 @@
     "bug_trace_length": 2,
     "leftover_candidates_total": 1,
     "leftover_rank": 1,
-    "pair_id": "9fdbc1aa84f18e77",
+    "pair_id": "24dd6402817e5ef0",
     "role": "counterpart",
     "selection_reason": "top_leftover_train_val",
-    "source_primary_pair_id": "6cc089ef63c94f1c",
+    "source_primary_pair_id": "1ddbb5add512d983",
     "testcase_key": "CWE121_06-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_ncat",
     "trace_file": "expected/03_signatures_non_empty/CWE121_06-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_ncat/7.json"
   },
