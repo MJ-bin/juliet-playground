@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Any
 
 from shared.dataset_export_core import run_step07_export_core
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
+from shared.jsonio import load_jsonl as _load_jsonl
 
 
 @dataclass(frozen=True)
@@ -47,18 +47,12 @@ class PrimaryDatasetExportResult:
 
 
 def load_pairs_jsonl(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with path.open('r', encoding='utf-8') as f:
-        for lineno, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            pair_id = obj.get('pair_id')
-            testcase_key = obj.get('testcase_key')
-            if not pair_id or not testcase_key:
-                raise ValueError(f'Missing pair_id/testcase_key at line {lineno} in {path}')
-            records.append(obj)
+    records = _load_jsonl(path)
+    for lineno, obj in enumerate(records, start=1):
+        pair_id = obj.get('pair_id')
+        testcase_key = obj.get('testcase_key')
+        if not pair_id or not testcase_key:
+            raise ValueError(f'Missing pair_id/testcase_key at line {lineno} in {path}')
     return records
 
 

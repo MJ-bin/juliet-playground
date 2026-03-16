@@ -99,6 +99,25 @@ def test_export_dataset_from_pipeline_validates_inputs_and_options(tmp_path):
         )
 
 
+def test_load_pairs_jsonl_validates_required_keys(tmp_path):
+    module = load_module_from_path(
+        'test_step07_behavior_pairs_jsonl',
+        REPO_ROOT / 'tools/stage/stage07_dataset_export.py',
+    )
+
+    pairs_jsonl = tmp_path / 'pairs.jsonl'
+    write_jsonl(
+        pairs_jsonl,
+        [
+            {'pair_id': 'pair-a', 'testcase_key': 'CASE_A'},
+            {'pair_id': 'pair-b'},
+        ],
+    )
+
+    with pytest.raises(ValueError, match='Missing pair_id/testcase_key'):
+        module.load_pairs_jsonl(pairs_jsonl)
+
+
 def test_export_dataset_from_pipeline_writes_split_and_dedup_outputs(tmp_path, monkeypatch):
     module = load_module_from_path(
         'test_step07_behavior_happy_path',

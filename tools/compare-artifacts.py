@@ -4,11 +4,12 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from shared.jsonio import load_json, load_jsonl
 
 VOLATILE_KEYS = {
     'generated_at',
@@ -116,14 +117,6 @@ def detect_artifact_kind(path: Path) -> str:
     )
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    with path.open('r', encoding='utf-8') as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f'Expected JSON object: {path}')
-    return data
-
-
 def normalize_json_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {
@@ -194,17 +187,6 @@ def make_token_count_key(row: dict[str, str]) -> tuple[str, str, str]:
         str(row.get('role') or ''),
         str(row.get('filename') or ''),
     )
-
-
-def load_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open('r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(json.loads(line))
-    return rows
 
 
 def preview(items: list[str], limit: int) -> list[str]:
