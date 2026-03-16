@@ -8,7 +8,7 @@ import json
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -43,6 +43,35 @@ export_dataset_from_pipeline = _stage07_dataset_export.export_dataset_from_pipel
 export_primary_dataset = _stage07_dataset_export.export_primary_dataset
 PatchedDatasetExportParams = _stage07b_patched_export.PatchedDatasetExportParams
 export_patched_dataset = _stage07b_patched_export.export_patched_dataset
+
+
+@dataclass(frozen=True)
+class FullRunConfig:
+    cwes: Optional[list[int]]
+    all_cwes: bool
+    files: list[str]
+    manifest: Path
+    source_root: Path
+    pipeline_root: Path
+    run_id: Optional[str]
+    committed_taint_config: Path
+    pair_split_seed: int
+    pair_train_ratio: float
+    dedup_mode: str
+
+
+@dataclass
+class RunExecutionState:
+    started_at: str
+    steps: dict[str, dict[str, object]] = field(default_factory=dict)
+    status: str = 'success'
+    error_message: Optional[str] = None
+    selected_taint_config: Optional[Path] = None
+    selected_reason: Optional[str] = None
+    infer_summary: dict[str, object] = field(default_factory=dict)
+    signature_non_empty_dir: Optional[Path] = None
+    ended_at: Optional[str] = None
+    total_duration_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -222,29 +251,35 @@ def run_internal_step(
     return result
 
 
-def _validate_full_inputs(
-    *,
-    manifest: Path,
-    source_root: Path,
-    committed_taint_config: Path,
-    cwes: Optional[list[int]],
-    all_cwes: bool,
-    files: list[str],
-    pair_train_ratio: float,
-    dedup_mode: str,
-) -> None:
-    if not manifest.exists():
-        raise ValueError(f'Manifest not found: {manifest}')
-    if not source_root.exists():
-        raise ValueError(f'Source root not found: {source_root}')
-    if not committed_taint_config.exists():
-        raise ValueError(f'Committed taint config not found: {committed_taint_config}')
-    if not files and not all_cwes and not cwes:
+def _validate_full_inputs(config: FullRunConfig) -> None:
+    if not config.manifest.exists():
+        raise ValueError(f'Manifest not found: {config.manifest}')
+    if not config.source_root.exists():
+        raise ValueError(f'Source root not found: {config.source_root}')
+    if not config.committed_taint_config.exists():
+        raise ValueError(f'Committed taint config not found: {config.committed_taint_config}')
+    if not config.files and not config.all_cwes and not config.cwes:
         raise ValueError('Provide cwes, use --all, or use --files')
-    if not (0.0 < pair_train_ratio < 1.0):
-        raise ValueError(f'pair_train_ratio must be between 0 and 1: {pair_train_ratio}')
-    if dedup_mode not in {'none', 'row'}:
-        raise ValueError(f'dedup_mode must be one of: none, row (got {dedup_mode})')
+    if not (0.0 < config.pair_train_ratio < 1.0):
+        raise ValueError(f'pair_train_ratio must be between 0 and 1: {config.pair_train_ratio}')
+    if config.dedup_mode not in {'none', 'row'}:
+        raise ValueError(f'dedup_mode must be one of: none, row (got {config.dedup_mode})')
+
+
+def _normalize_full_run_config(config: FullRunConfig) -> FullRunConfig:
+    return FullRunConfig(
+        cwes=config.cwes,
+        all_cwes=config.all_cwes,
+        files=list(config.files),
+        manifest=config.manifest.resolve(),
+        source_root=config.source_root.resolve(),
+        pipeline_root=config.pipeline_root.resolve(),
+        run_id=config.run_id or f'run-{now_ts()}',
+        committed_taint_config=config.committed_taint_config.resolve(),
+        pair_split_seed=config.pair_split_seed,
+        pair_train_ratio=config.pair_train_ratio,
+        dedup_mode=config.dedup_mode,
+    )
 
 
 def _require_exists(path: Path, error_message: str) -> None:
@@ -535,68 +570,50 @@ def _summarize_steps(steps: dict[str, dict[str, object]]) -> dict[str, dict[str,
 
 
 def _build_run_summary_payload(
-    *,
-    status: str,
-    error_message: Optional[str],
-    started_at: str,
-    ended_at: str,
-    total_duration_sec: float,
-    pipeline_root: Path,
-    run_id: str,
-    manifest: Path,
-    source_root: Path,
-    all_cwes: bool,
-    cwes: Optional[list[int]],
-    files: list[str],
-    pair_split_seed: int,
-    pair_train_ratio: float,
-    dedup_mode: str,
-    committed_taint_config: Path,
+    config: FullRunConfig,
     paths: FullRunPaths,
-    selected_taint_config: Optional[Path],
-    selected_reason: Optional[str],
-    steps: dict[str, dict[str, object]],
-    infer_summary: dict[str, object],
-    signature_non_empty_dir: Optional[Path],
+    state: RunExecutionState,
 ) -> dict[str, object]:
     selected_taint_config_str = (
-        str(selected_taint_config.resolve()) if selected_taint_config is not None else None
+        str(state.selected_taint_config.resolve())
+        if state.selected_taint_config is not None
+        else None
     )
 
     return {
-        'status': status,
-        'error_message': error_message,
-        'started_at': started_at,
-        'ended_at': ended_at,
-        'duration_sec': total_duration_sec,
+        'status': state.status,
+        'error_message': state.error_message,
+        'started_at': state.started_at,
+        'ended_at': state.ended_at,
+        'duration_sec': state.total_duration_sec,
         'run': {
-            'pipeline_root': str(pipeline_root),
-            'run_id': run_id,
+            'pipeline_root': str(config.pipeline_root),
+            'run_id': config.run_id,
             'run_dir': str(paths.run_dir),
         },
         'inputs': {
-            'manifest': str(manifest.resolve()),
-            'source_root': str(source_root.resolve()),
-            'mode': 'files' if files else ('all' if all_cwes else 'cwes'),
-            'cwes': cwes or [],
-            'files': files,
+            'manifest': str(config.manifest),
+            'source_root': str(config.source_root),
+            'mode': 'files' if config.files else ('all' if config.all_cwes else 'cwes'),
+            'cwes': config.cwes or [],
+            'files': config.files,
         },
         'config': {
-            'pair_split_seed': pair_split_seed,
-            'pair_train_ratio': pair_train_ratio,
-            'dedup_mode': dedup_mode,
+            'pair_split_seed': config.pair_split_seed,
+            'pair_train_ratio': config.pair_train_ratio,
+            'dedup_mode': config.dedup_mode,
             'selected_taint_config_path': selected_taint_config_str,
-            'selected_reason': selected_reason,
+            'selected_reason': state.selected_reason,
         },
-        'steps': _summarize_steps(steps),
+        'steps': _summarize_steps(state.steps),
         'outputs': {
             'stage01': {'output_dir': str(paths.manifest_dir)},
             'stage02a': {'output_dir': str(paths.taint_dir)},
             'stage02b': {'output_dir': str(paths.stage02b.output_dir)},
             'stage03': {
                 'infer_summary_json': str(paths.infer_summary_json),
-                'signature_non_empty_dir': str(signature_non_empty_dir)
-                if signature_non_empty_dir is not None
+                'signature_non_empty_dir': str(state.signature_non_empty_dir)
+                if state.signature_non_empty_dir is not None
                 else None,
             },
             'stage04': {'trace_flow_match_strict_jsonl': str(paths.trace_strict_jsonl)},
@@ -618,147 +635,95 @@ def _build_run_summary_payload(
 
 
 def run_full_pipeline(
-    *,
-    cwes: Optional[list[int]],
-    all_cwes: bool,
-    files: list[str],
-    manifest: Path,
-    source_root: Path,
-    pipeline_root: Path,
-    run_id: Optional[str],
-    committed_taint_config: Path,
-    pair_split_seed: int,
-    pair_train_ratio: float,
-    dedup_mode: str,
+    config: FullRunConfig,
 ) -> int:
-    _validate_full_inputs(
-        manifest=manifest,
-        source_root=source_root,
-        committed_taint_config=committed_taint_config,
-        cwes=cwes,
-        all_cwes=all_cwes,
-        files=files,
-        pair_train_ratio=pair_train_ratio,
-        dedup_mode=dedup_mode,
-    )
+    _validate_full_inputs(config)
+    config = _normalize_full_run_config(config)
 
-    manifest = manifest.resolve()
-    source_root = source_root.resolve()
-    committed_taint_config = committed_taint_config.resolve()
-    pipeline_root = pipeline_root.resolve()
-
-    if run_id is None:
-        run_id = f'run-{now_ts()}'
-
-    run_dir = (pipeline_root / run_id).resolve()
+    assert config.run_id is not None
+    run_dir = (config.pipeline_root / config.run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    paths = _build_full_run_paths(run_dir=run_dir, source_root=source_root)
+    paths = _build_full_run_paths(run_dir=run_dir, source_root=config.source_root)
 
-    started_at = now_iso_utc()
+    state = RunExecutionState(started_at=now_iso_utc())
     started_perf = time.perf_counter()
-    steps: dict[str, dict[str, object]] = {}
-    status = 'success'
-    error_message: Optional[str] = None
-    selected_taint_config: Optional[Path] = None
-    selected_reason: Optional[str] = None
-    infer_summary: dict[str, object] = {}
-    signature_non_empty_dir: Optional[Path] = None
 
     try:
-        steps['01_manifest_comment_scan'] = run_step01_manifest_comment_scan(
+        state.steps['01_manifest_comment_scan'] = run_step01_manifest_comment_scan(
             paths=paths,
-            manifest=manifest,
-            source_root=source_root,
+            manifest=config.manifest,
+            source_root=config.source_root,
         )
-        steps['02a_code_field_inventory'] = run_step02a_code_field_inventory(
+        state.steps['02a_code_field_inventory'] = run_step02a_code_field_inventory(
             paths=paths,
-            source_root=source_root,
+            source_root=config.source_root,
         )
-        steps.update(run_step02b_flow_build(paths=paths))
+        state.steps.update(run_step02b_flow_build(paths=paths))
 
-        selected_taint_config, selected_reason = _select_taint_config(
+        state.selected_taint_config, state.selected_reason = _select_taint_config(
             generated_taint_config=paths.generated_taint_config,
-            committed_taint_config=committed_taint_config,
+            committed_taint_config=config.committed_taint_config,
         )
         (
-            steps['03_infer_and_signature'],
-            infer_summary,
-            signature_non_empty_dir,
+            state.steps['03_infer_and_signature'],
+            state.infer_summary,
+            state.signature_non_empty_dir,
         ) = run_step03_infer_and_signature(
             paths=paths,
-            selected_taint_config=selected_taint_config,
-            files=files,
-            all_cwes=all_cwes,
-            cwes=cwes,
+            selected_taint_config=state.selected_taint_config,
+            files=config.files,
+            all_cwes=config.all_cwes,
+            cwes=config.cwes,
         )
-        steps['04_trace_flow_filter'] = run_step04_trace_flow(
+        state.steps['04_trace_flow_filter'] = run_step04_trace_flow(
             paths=paths,
-            signature_non_empty_dir=signature_non_empty_dir,
+            signature_non_empty_dir=state.signature_non_empty_dir,
         )
-        steps['05_pair_trace_dataset'] = run_step05_pair_trace(paths=paths)
-        steps['06_generate_slices'] = run_step06_slices(paths=paths)
-        steps['07_dataset_export'] = run_step07_dataset_export(
+        state.steps['05_pair_trace_dataset'] = run_step05_pair_trace(paths=paths)
+        state.steps['06_generate_slices'] = run_step06_slices(paths=paths)
+        state.steps['07_dataset_export'] = run_step07_dataset_export(
             paths=paths,
-            pair_split_seed=pair_split_seed,
-            pair_train_ratio=pair_train_ratio,
-            dedup_mode=dedup_mode,
+            pair_split_seed=config.pair_split_seed,
+            pair_train_ratio=config.pair_train_ratio,
+            dedup_mode=config.dedup_mode,
         )
-        steps['07b_train_patched_counterparts_export'] = run_step07b_train_patched_counterparts(
-            paths=paths,
-            dedup_mode=dedup_mode,
+        state.steps['07b_train_patched_counterparts_export'] = (
+            run_step07b_train_patched_counterparts(
+                paths=paths,
+                dedup_mode=config.dedup_mode,
+            )
         )
     except Exception as exc:
-        status = 'failed'
-        error_message = str(exc)
+        state.status = 'failed'
+        state.error_message = str(exc)
 
-    ended_at = now_iso_utc()
-    total_duration_sec = round(time.perf_counter() - started_perf, 6)
+    state.ended_at = now_iso_utc()
+    state.total_duration_sec = round(time.perf_counter() - started_perf, 6)
 
-    summary_payload = _build_run_summary_payload(
-        status=status,
-        error_message=error_message,
-        started_at=started_at,
-        ended_at=ended_at,
-        total_duration_sec=total_duration_sec,
-        pipeline_root=pipeline_root,
-        run_id=run_id,
-        manifest=manifest,
-        source_root=source_root,
-        all_cwes=all_cwes,
-        cwes=cwes,
-        files=files,
-        pair_split_seed=pair_split_seed,
-        pair_train_ratio=pair_train_ratio,
-        dedup_mode=dedup_mode,
-        committed_taint_config=committed_taint_config,
-        paths=paths,
-        selected_taint_config=selected_taint_config,
-        selected_reason=selected_reason,
-        steps=steps,
-        infer_summary=infer_summary,
-        signature_non_empty_dir=signature_non_empty_dir,
-    )
+    summary_payload = _build_run_summary_payload(config, paths, state)
     write_json(paths.run_summary_path, summary_payload)
 
     print(json.dumps(summary_payload, ensure_ascii=False))
-    return 0 if status == 'success' else 1
+    return 0 if state.status == 'success' else 1
 
 
 def main() -> int:
     args = parse_args()
     try:
         return run_full_pipeline(
-            cwes=args.cwes or None,
-            all_cwes=args.all_cwes,
-            files=args.files,
-            manifest=args.manifest,
-            source_root=args.source_root,
-            pipeline_root=args.pipeline_root,
-            run_id=args.run_id,
-            committed_taint_config=args.committed_taint_config,
-            pair_split_seed=args.pair_split_seed,
-            pair_train_ratio=args.pair_train_ratio,
-            dedup_mode=args.dedup_mode,
+            FullRunConfig(
+                cwes=args.cwes or None,
+                all_cwes=args.all_cwes,
+                files=args.files,
+                manifest=args.manifest,
+                source_root=args.source_root,
+                pipeline_root=args.pipeline_root,
+                run_id=args.run_id,
+                committed_taint_config=args.committed_taint_config,
+                pair_split_seed=args.pair_split_seed,
+                pair_train_ratio=args.pair_train_ratio,
+                dedup_mode=args.dedup_mode,
+            )
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
