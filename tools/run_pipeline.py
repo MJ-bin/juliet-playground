@@ -9,6 +9,7 @@ import json
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -40,6 +41,63 @@ export_dataset_from_pipeline = _stage07_dataset_export.export_dataset_from_pipel
 export_primary_dataset = _stage07_dataset_export.export_primary_dataset
 PatchedDatasetExportParams = _stage07b_patched_export.PatchedDatasetExportParams
 export_patched_dataset = _stage07b_patched_export.export_patched_dataset
+
+
+@dataclass(frozen=True)
+class FullRunPaths:
+    run_dir: Path
+    manifest_dir: Path
+    taint_dir: Path
+    flow_dir: Path
+    infer_results_root: Path
+    signatures_root: Path
+    trace_dir: Path
+    pair_dir: Path
+    slice_stage_dir: Path
+    dataset_stage_dir: Path
+    logs_dir: Path
+    manifest_with_comments_xml: Path
+    generated_taint_config: Path
+    function_names_unique_csv: Path
+    function_inventory_summary_json: Path
+    function_names_categorized_jsonl: Path
+    grouped_family_role_json: Path
+    category_summary_json: Path
+    manifest_with_testcase_flows_xml: Path
+    testcase_flow_summary_json: Path
+    infer_summary_json: Path
+    trace_strict_jsonl: Path
+    pairs_jsonl: Path
+    leftover_counterparts_jsonl: Path
+    paired_signatures_dir: Path
+    paired_trace_summary_json: Path
+    train_patched_counterparts_pairs_jsonl: Path
+    train_patched_counterparts_signatures_dir: Path
+    train_patched_counterparts_selection_summary_json: Path
+    slice_dir: Path
+    slice_summary_json: Path
+    train_patched_counterparts_slice_stage_dir: Path
+    train_patched_counterparts_slice_dir: Path
+    train_patched_counterparts_slice_summary_json: Path
+    normalized_slices_dir: Path
+    real_vul_data_csv: Path
+    real_vul_data_dedup_dropped_csv: Path
+    normalized_token_counts_csv: Path
+    slice_token_distribution_png: Path
+    dataset_split_manifest_json: Path
+    dataset_summary_json: Path
+    train_patched_counterparts_csv: Path
+    train_patched_counterparts_dedup_dropped_csv: Path
+    train_patched_counterparts_slices_dir: Path
+    train_patched_counterparts_token_counts_csv: Path
+    train_patched_counterparts_token_distribution_png: Path
+    train_patched_counterparts_split_manifest_json: Path
+    train_patched_counterparts_summary_json: Path
+    run_summary_path: Path
+    source_testcases_root: Path
+
+    def __getitem__(self, key: str) -> Path:
+        return getattr(self, key)
 
 
 def _print_result(result: Any) -> int:
@@ -210,7 +268,7 @@ def sha256_file(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
-def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, Path]:
+def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> FullRunPaths:
     run_dir = run_dir.resolve()
     source_root = source_root.resolve()
 
@@ -224,7 +282,9 @@ def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, Path
     slice_stage_dir = run_dir / '06_slices'
     dataset_stage_dir = run_dir / '07_dataset_export'
     logs_dir = run_dir / 'logs'
-    train_patched_counterparts_slice_stage_dir = slice_stage_dir / TRAIN_PATCHED_COUNTERPARTS_BASENAME
+    train_patched_counterparts_slice_stage_dir = (
+        slice_stage_dir / TRAIN_PATCHED_COUNTERPARTS_BASENAME
+    )
     pair_trace_paths = build_pair_trace_paths(pair_dir)
     slice_stage_paths = build_slice_stage_paths(slice_stage_dir)
     train_patched_slice_stage_paths = build_slice_stage_paths(
@@ -240,74 +300,70 @@ def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, Path
         TRAIN_PATCHED_COUNTERPARTS_BASENAME,
     )
 
-    return {
-        'run_dir': run_dir,
-        'manifest_dir': manifest_dir,
-        'taint_dir': taint_dir,
-        'flow_dir': flow_dir,
-        'infer_results_root': infer_results_root,
-        'signatures_root': signatures_root,
-        'trace_dir': trace_dir,
-        'pair_dir': pair_dir,
-        'slice_stage_dir': slice_stage_dir,
-        'dataset_stage_dir': dataset_stage_dir,
-        'logs_dir': logs_dir,
-        'manifest_with_comments_xml': manifest_dir / 'manifest_with_comments.xml',
-        'generated_taint_config': taint_dir / 'pulse-taint-config.json',
-        'function_names_unique_csv': flow_dir / 'function_names_unique.csv',
-        'function_inventory_summary_json': flow_dir / 'function_inventory_summary.json',
-        'function_names_categorized_jsonl': flow_dir / 'function_names_categorized.jsonl',
-        'grouped_family_role_json': flow_dir / 'grouped_family_role.json',
-        'category_summary_json': flow_dir / 'category_summary.json',
-        'manifest_with_testcase_flows_xml': flow_dir / 'manifest_with_testcase_flows.xml',
-        'testcase_flow_summary_json': flow_dir / 'testcase_flow_summary.json',
-        'infer_summary_json': run_dir / '03_infer_summary.json',
-        'trace_strict_jsonl': trace_dir / 'trace_flow_match_strict.jsonl',
-        'pairs_jsonl': pair_trace_paths['pairs_jsonl'],
-        'leftover_counterparts_jsonl': pair_trace_paths['leftover_counterparts_jsonl'],
-        'paired_signatures_dir': pair_trace_paths['paired_signatures_dir'],
-        'paired_trace_summary_json': pair_trace_paths['summary_json'],
-        'train_patched_counterparts_pairs_jsonl': train_patched_counterparts_paths['pairs_jsonl'],
-        'train_patched_counterparts_signatures_dir': train_patched_counterparts_paths[
+    return FullRunPaths(
+        run_dir=run_dir,
+        manifest_dir=manifest_dir,
+        taint_dir=taint_dir,
+        flow_dir=flow_dir,
+        infer_results_root=infer_results_root,
+        signatures_root=signatures_root,
+        trace_dir=trace_dir,
+        pair_dir=pair_dir,
+        slice_stage_dir=slice_stage_dir,
+        dataset_stage_dir=dataset_stage_dir,
+        logs_dir=logs_dir,
+        manifest_with_comments_xml=manifest_dir / 'manifest_with_comments.xml',
+        generated_taint_config=taint_dir / 'pulse-taint-config.json',
+        function_names_unique_csv=flow_dir / 'function_names_unique.csv',
+        function_inventory_summary_json=flow_dir / 'function_inventory_summary.json',
+        function_names_categorized_jsonl=flow_dir / 'function_names_categorized.jsonl',
+        grouped_family_role_json=flow_dir / 'grouped_family_role.json',
+        category_summary_json=flow_dir / 'category_summary.json',
+        manifest_with_testcase_flows_xml=flow_dir / 'manifest_with_testcase_flows.xml',
+        testcase_flow_summary_json=flow_dir / 'testcase_flow_summary.json',
+        infer_summary_json=run_dir / '03_infer_summary.json',
+        trace_strict_jsonl=trace_dir / 'trace_flow_match_strict.jsonl',
+        pairs_jsonl=pair_trace_paths['pairs_jsonl'],
+        leftover_counterparts_jsonl=pair_trace_paths['leftover_counterparts_jsonl'],
+        paired_signatures_dir=pair_trace_paths['paired_signatures_dir'],
+        paired_trace_summary_json=pair_trace_paths['summary_json'],
+        train_patched_counterparts_pairs_jsonl=train_patched_counterparts_paths['pairs_jsonl'],
+        train_patched_counterparts_signatures_dir=train_patched_counterparts_paths[
             'signatures_dir'
         ],
-        'train_patched_counterparts_selection_summary_json': train_patched_counterparts_paths[
+        train_patched_counterparts_selection_summary_json=train_patched_counterparts_paths[
             'selection_summary_json'
         ],
-        'slice_dir': slice_stage_paths['slice_dir'],
-        'slice_summary_json': slice_stage_paths['summary_json'],
-        'train_patched_counterparts_slice_stage_dir': train_patched_counterparts_slice_stage_dir,
-        'train_patched_counterparts_slice_dir': train_patched_slice_stage_paths['slice_dir'],
-        'train_patched_counterparts_slice_summary_json': train_patched_slice_stage_paths[
+        slice_dir=slice_stage_paths['slice_dir'],
+        slice_summary_json=slice_stage_paths['summary_json'],
+        train_patched_counterparts_slice_stage_dir=train_patched_counterparts_slice_stage_dir,
+        train_patched_counterparts_slice_dir=train_patched_slice_stage_paths['slice_dir'],
+        train_patched_counterparts_slice_summary_json=train_patched_slice_stage_paths[
             'summary_json'
         ],
-        'normalized_slices_dir': primary_dataset_paths['normalized_slices_dir'],
-        'real_vul_data_csv': primary_dataset_paths['csv_path'],
-        'real_vul_data_dedup_dropped_csv': primary_dataset_paths['dedup_dropped_csv'],
-        'normalized_token_counts_csv': primary_dataset_paths['token_counts_csv'],
-        'slice_token_distribution_png': primary_dataset_paths['token_distribution_png'],
-        'dataset_split_manifest_json': primary_dataset_paths['split_manifest_json'],
-        'dataset_summary_json': primary_dataset_paths['summary_json'],
-        'train_patched_counterparts_csv': train_patched_dataset_paths['csv_path'],
-        'train_patched_counterparts_dedup_dropped_csv': train_patched_dataset_paths[
+        normalized_slices_dir=primary_dataset_paths['normalized_slices_dir'],
+        real_vul_data_csv=primary_dataset_paths['csv_path'],
+        real_vul_data_dedup_dropped_csv=primary_dataset_paths['dedup_dropped_csv'],
+        normalized_token_counts_csv=primary_dataset_paths['token_counts_csv'],
+        slice_token_distribution_png=primary_dataset_paths['token_distribution_png'],
+        dataset_split_manifest_json=primary_dataset_paths['split_manifest_json'],
+        dataset_summary_json=primary_dataset_paths['summary_json'],
+        train_patched_counterparts_csv=train_patched_dataset_paths['csv_path'],
+        train_patched_counterparts_dedup_dropped_csv=train_patched_dataset_paths[
             'dedup_dropped_csv'
         ],
-        'train_patched_counterparts_slices_dir': train_patched_dataset_paths[
-            'normalized_slices_dir'
-        ],
-        'train_patched_counterparts_token_counts_csv': train_patched_dataset_paths[
-            'token_counts_csv'
-        ],
-        'train_patched_counterparts_token_distribution_png': train_patched_dataset_paths[
+        train_patched_counterparts_slices_dir=train_patched_dataset_paths['normalized_slices_dir'],
+        train_patched_counterparts_token_counts_csv=train_patched_dataset_paths['token_counts_csv'],
+        train_patched_counterparts_token_distribution_png=train_patched_dataset_paths[
             'token_distribution_png'
         ],
-        'train_patched_counterparts_split_manifest_json': train_patched_dataset_paths[
+        train_patched_counterparts_split_manifest_json=train_patched_dataset_paths[
             'split_manifest_json'
         ],
-        'train_patched_counterparts_summary_json': train_patched_dataset_paths['summary_json'],
-        'run_summary_path': run_dir / 'run_summary.json',
-        'source_testcases_root': source_root / 'testcases',
-    }
+        train_patched_counterparts_summary_json=train_patched_dataset_paths['summary_json'],
+        run_summary_path=run_dir / 'run_summary.json',
+        source_testcases_root=source_root / 'testcases',
+    )
 
 
 def run_internal_step(
@@ -419,7 +475,7 @@ def _select_taint_config(
 
 def run_step01_manifest_comment_scan(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     manifest: Path,
     source_root: Path,
 ) -> dict[str, object]:
@@ -442,7 +498,7 @@ def run_step01_manifest_comment_scan(
 
 def run_step02a_code_field_inventory(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     source_root: Path,
 ) -> dict[str, object]:
     return _run_checked_internal_step(
@@ -463,7 +519,7 @@ def run_step02a_code_field_inventory(
     )
 
 
-def run_step02b_flow_build(*, paths: dict[str, Path]) -> dict[str, dict[str, object]]:
+def run_step02b_flow_build(*, paths: FullRunPaths) -> dict[str, dict[str, object]]:
     results: dict[str, dict[str, object]] = {}
     results['02b_function_inventory_extract'] = run_internal_step(
         '02b_function_inventory_extract',
@@ -530,15 +586,14 @@ def run_step02b_flow_build(*, paths: dict[str, Path]) -> dict[str, dict[str, obj
             f'Expected testcase flow summary JSON not found: {paths["testcase_flow_summary_json"]}',
         ),
     ]
-    for output_path, error_message in required_outputs:
-        _require_exists(output_path, error_message)
+    _require_all(required_outputs)
 
     return results
 
 
 def run_step03_infer_and_signature(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     selected_taint_config: Path,
     files: list[str],
     all_cwes: bool,
@@ -592,7 +647,7 @@ def run_step03_infer_and_signature(
 
 def run_step04_trace_flow(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     signature_non_empty_dir: Path,
 ) -> dict[str, object]:
     return _run_checked_internal_step(
@@ -612,7 +667,7 @@ def run_step04_trace_flow(
     )
 
 
-def run_step05_pair_trace(*, paths: dict[str, Path]) -> dict[str, object]:
+def run_step05_pair_trace(*, paths: FullRunPaths) -> dict[str, object]:
     return _run_checked_internal_step(
         step_key='05_pair_trace_dataset',
         logs_dir=paths['logs_dir'],
@@ -636,7 +691,7 @@ def run_step05_pair_trace(*, paths: dict[str, Path]) -> dict[str, object]:
     )
 
 
-def run_step06_slices(*, paths: dict[str, Path]) -> dict[str, object]:
+def run_step06_slices(*, paths: FullRunPaths) -> dict[str, object]:
     return _run_checked_internal_step(
         step_key='06_generate_slices',
         logs_dir=paths['logs_dir'],
@@ -658,7 +713,7 @@ def run_step06_slices(*, paths: dict[str, Path]) -> dict[str, object]:
 
 def run_step07_dataset_export(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     pair_split_seed: int,
     pair_train_ratio: float,
     dedup_mode: str,
@@ -714,7 +769,7 @@ def run_step07_dataset_export(
 
 def run_step07b_train_patched_counterparts(
     *,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     dedup_mode: str,
 ) -> dict[str, object]:
     return _run_checked_internal_step(
@@ -818,7 +873,7 @@ def _build_run_summary_payload(
     pair_train_ratio: float,
     dedup_mode: str,
     committed_taint_config: Path,
-    paths: dict[str, Path],
+    paths: FullRunPaths,
     selected_taint_config: Optional[Path],
     selected_reason: Optional[str],
     steps: dict[str, dict[str, object]],
