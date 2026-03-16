@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
+from shared.artifact_layout import build_dataset_export_paths
 from shared.dataset_dedup import ROLE_SORT_ORDER, dedupe_pairs_by_normalized_rows
 from shared.dataset_normalize import normalize_slice_function_names
 from shared.dataset_sources import (
@@ -23,25 +24,7 @@ def _prepare_export_outputs(*, csv_path: Path, normalized_slices_dir: Path) -> N
 def build_step07_export_paths(
     output_dir: Path, dataset_basename: str | None = None
 ) -> dict[str, Path]:
-    if dataset_basename:
-        return {
-            'csv_path': output_dir / f'{dataset_basename}.csv',
-            'dedup_dropped_csv': output_dir / f'{dataset_basename}_dedup_dropped.csv',
-            'normalized_slices_dir': output_dir / f'{dataset_basename}_slices',
-            'token_counts_csv': output_dir / f'{dataset_basename}_token_counts.csv',
-            'token_distribution_png': output_dir / f'{dataset_basename}_token_distribution.png',
-            'split_manifest_json': output_dir / f'{dataset_basename}_split_manifest.json',
-            'summary_json': output_dir / f'{dataset_basename}_summary.json',
-        }
-    return {
-        'csv_path': output_dir / 'Real_Vul_data.csv',
-        'dedup_dropped_csv': output_dir / 'Real_Vul_data_dedup_dropped.csv',
-        'normalized_slices_dir': output_dir / 'normalized_slices',
-        'token_counts_csv': output_dir / 'normalized_token_counts.csv',
-        'token_distribution_png': output_dir / 'slice_token_distribution.png',
-        'split_manifest_json': output_dir / 'split_manifest.json',
-        'summary_json': output_dir / 'summary.json',
-    }
+    return build_dataset_export_paths(output_dir, dataset_basename)
 
 
 def run_step07_export_wrapper(
@@ -71,7 +54,7 @@ def run_step07_export_wrapper(
         raise ValueError(f'Unsupported dedup_mode: {dedup_mode}')
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    export_paths = build_step07_export_paths(
+    export_paths = build_dataset_export_paths(
         output_dir=output_dir,
         dataset_basename=dataset_basename,
     )

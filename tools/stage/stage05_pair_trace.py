@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from shared.artifact_layout import build_pair_trace_paths
 from shared.fs import prepare_output_dir
+from shared.pairing import (
+    build_pairing_meta,
+    build_signature_meta,
+    build_trace_priority_key,
+    make_pair_id,
+)
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
-from shared.signatures import load_signature_payload, stable_signature_ref, stable_trace_ref
+from shared.signatures import load_signature_payload
 
 COUNTERPART_FLOW_TYPES = {
     'g2b',
@@ -118,11 +124,11 @@ def group_by_testcase(
 
 
 def record_sort_key(record: StrictTraceRecord) -> tuple[Any, ...]:
-    return (
-        -record.bug_trace_length,
-        stable_trace_ref(record.trace_file),
-        record.best_flow_type,
-        record.procedure or '',
+    return build_trace_priority_key(
+        bug_trace_length=record.bug_trace_length,
+        trace_file=str(record.trace_file),
+        best_flow_type=record.best_flow_type,
+        procedure=record.procedure,
     )
 
 
@@ -132,50 +138,19 @@ def select_best_record(records: list[StrictTraceRecord]) -> StrictTraceRecord | 
     return sorted(records, key=record_sort_key)[0]
 
 
-def make_pair_id(
-    testcase_key: str,
-    b2b_record: StrictTraceRecord,
-    b2b_payload: dict[str, Any],
-    counterpart_record: StrictTraceRecord,
-    counterpart_payload: dict[str, Any],
-) -> str:
-    seed = '||'.join(
-        [
-            testcase_key,
-            b2b_record.best_flow_type,
-            stable_signature_ref(b2b_payload, b2b_record.trace_file),
-            counterpart_record.best_flow_type,
-            stable_signature_ref(counterpart_payload, counterpart_record.trace_file),
-        ]
-    )
-    return hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]
-
-
-def signature_meta(payload: dict[str, Any], record: StrictTraceRecord) -> dict[str, Any]:
-    return {
-        'trace_file': str(record.trace_file),
-        'best_flow_type': record.best_flow_type,
-        'bug_trace_length': record.bug_trace_length,
-        'procedure': record.procedure,
-        'primary_file': record.primary_file,
-        'primary_line': record.primary_line,
-        'signature_key': payload.get('key'),
-        'signature_hash': payload.get('hash'),
-    }
-
-
 def build_paired_trace_dataset(
     *, trace_jsonl: Path, output_dir: Path, overwrite: bool = False, run_dir: Path | None = None
 ) -> dict[str, Any]:
     validate_args(trace_jsonl)
     prepare_output_dir(output_dir, overwrite)
 
-    paired_signatures_dir = output_dir / 'paired_signatures'
+    pair_trace_paths = build_pair_trace_paths(output_dir)
+    paired_signatures_dir = pair_trace_paths['paired_signatures_dir']
     paired_signatures_dir.mkdir(parents=True, exist_ok=True)
 
-    pairs_jsonl = output_dir / 'pairs.jsonl'
-    leftovers_jsonl = output_dir / 'leftover_counterparts.jsonl'
-    summary_json = output_dir / 'summary.json'
+    pairs_jsonl = pair_trace_paths['pairs_jsonl']
+    leftovers_jsonl = pair_trace_paths['leftover_counterparts_jsonl']
+    summary_json = pair_trace_paths['summary_json']
 
     strict_records = load_strict_records(trace_jsonl)
     grouped = group_by_testcase(strict_records)
@@ -230,10 +205,12 @@ def build_paired_trace_dataset(
         counterpart_payload = load_signature_payload(counterpart_record.trace_file)
         pair_id = make_pair_id(
             testcase_key=testcase_key,
-            b2b_record=b2b_record,
             b2b_payload=b2b_payload,
-            counterpart_record=counterpart_record,
+            b2b_trace_file=str(b2b_record.trace_file),
+            b2b_flow_type=b2b_record.best_flow_type,
             counterpart_payload=counterpart_payload,
+            counterpart_trace_file=str(counterpart_record.trace_file),
+            counterpart_flow_type=counterpart_record.best_flow_type,
         )
 
         testcase_dir = paired_signatures_dir / testcase_key
@@ -243,25 +220,25 @@ def build_paired_trace_dataset(
         counterpart_output_path = testcase_dir / f'{counterpart_record.best_flow_type}.json'
 
         b2b_export = dict(b2b_payload)
-        b2b_export['pairing_meta'] = {
-            'pair_id': pair_id,
-            'testcase_key': testcase_key,
-            'role': 'b2b',
-            'selection_reason': pair['selection_reason'],
-            'trace_file': str(b2b_record.trace_file),
-            'best_flow_type': b2b_record.best_flow_type,
-            'bug_trace_length': b2b_record.bug_trace_length,
-        }
+        b2b_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
+            testcase_key=testcase_key,
+            role='b2b',
+            selection_reason=str(pair['selection_reason']),
+            trace_file=str(b2b_record.trace_file),
+            best_flow_type=b2b_record.best_flow_type,
+            bug_trace_length=b2b_record.bug_trace_length,
+        )
         counterpart_export = dict(counterpart_payload)
-        counterpart_export['pairing_meta'] = {
-            'pair_id': pair_id,
-            'testcase_key': testcase_key,
-            'role': 'counterpart',
-            'selection_reason': pair['selection_reason'],
-            'trace_file': str(counterpart_record.trace_file),
-            'best_flow_type': counterpart_record.best_flow_type,
-            'bug_trace_length': counterpart_record.bug_trace_length,
-        }
+        counterpart_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
+            testcase_key=testcase_key,
+            role='counterpart',
+            selection_reason=str(pair['selection_reason']),
+            trace_file=str(counterpart_record.trace_file),
+            best_flow_type=counterpart_record.best_flow_type,
+            bug_trace_length=counterpart_record.bug_trace_length,
+        )
 
         b2b_output_path.write_text(
             json.dumps(b2b_export, ensure_ascii=False, indent=2) + '\n',
@@ -280,11 +257,27 @@ def build_paired_trace_dataset(
                 'b2b_flow_type': b2b_record.best_flow_type,
                 'b2b_trace_file': str(b2b_record.trace_file),
                 'b2b_bug_trace_length': b2b_record.bug_trace_length,
-                'b2b_signature': signature_meta(b2b_payload, b2b_record),
+                'b2b_signature': build_signature_meta(
+                    payload=b2b_payload,
+                    trace_file=str(b2b_record.trace_file),
+                    best_flow_type=b2b_record.best_flow_type,
+                    bug_trace_length=b2b_record.bug_trace_length,
+                    procedure=b2b_record.procedure,
+                    primary_file=b2b_record.primary_file,
+                    primary_line=b2b_record.primary_line,
+                ),
                 'counterpart_flow_type': counterpart_record.best_flow_type,
                 'counterpart_trace_file': str(counterpart_record.trace_file),
                 'counterpart_bug_trace_length': counterpart_record.bug_trace_length,
-                'counterpart_signature': signature_meta(counterpart_payload, counterpart_record),
+                'counterpart_signature': build_signature_meta(
+                    payload=counterpart_payload,
+                    trace_file=str(counterpart_record.trace_file),
+                    best_flow_type=counterpart_record.best_flow_type,
+                    bug_trace_length=counterpart_record.bug_trace_length,
+                    procedure=counterpart_record.procedure,
+                    primary_file=counterpart_record.primary_file,
+                    primary_line=counterpart_record.primary_line,
+                ),
                 'output_files': {
                     'b2b': str(b2b_output_path),
                     counterpart_record.best_flow_type: str(counterpart_output_path),

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -8,18 +7,30 @@ from pathlib import Path
 from typing import Any
 
 from shared import fs as _fs_utils
+from shared.artifact_layout import (
+    TRAIN_PATCHED_COUNTERPARTS_BASENAME,
+    build_dataset_export_paths,
+    build_pair_trace_paths,
+    build_patched_pairing_paths,
+    build_slice_stage_paths,
+)
 from shared.dataset_export_core import run_step07_export_core, run_step07_export_wrapper
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
 from shared.jsonio import load_jsonl
+from shared.pairing import (
+    build_pairing_meta,
+    build_signature_meta,
+    build_trace_priority_key,
+    make_pair_id,
+)
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
-from shared.signatures import load_signature_payload, stable_signature_ref, stable_trace_ref
+from shared.signatures import load_signature_payload
 
 from stage.stage06_slices import generate_slices
 
-DATASET_BASENAME = 'train_patched_counterparts'
+DATASET_BASENAME = TRAIN_PATCHED_COUNTERPARTS_BASENAME
 prepare_target = _fs_utils.prepare_target
-remove_target = _fs_utils.remove_target
 
 
 @dataclass(frozen=True)
@@ -117,7 +128,9 @@ def resolve_paths(
         resolved_dataset_export_dir = dataset_export_dir.resolve()
 
     if signature_output_dir is None:
-        resolved_signature_output_dir = resolved_pair_dir / f'{DATASET_BASENAME}_signatures'
+        resolved_signature_output_dir = build_patched_pairing_paths(
+            resolved_pair_dir, DATASET_BASENAME
+        )['signatures_dir']
     else:
         resolved_signature_output_dir = signature_output_dir.resolve()
 
@@ -160,47 +173,12 @@ def validate_args(
 
 
 def leftover_sort_key(record: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        -int(record.get('bug_trace_length', 0) or 0),
-        stable_trace_ref(record.get('trace_file') or ''),
-        str(record.get('best_flow_type') or ''),
-        str(record.get('procedure') or ''),
+    return build_trace_priority_key(
+        bug_trace_length=int(record.get('bug_trace_length', 0) or 0),
+        trace_file=str(record.get('trace_file') or ''),
+        best_flow_type=str(record.get('best_flow_type') or ''),
+        procedure=record.get('procedure'),
     )
-
-
-def make_pair_id(
-    testcase_key: str,
-    b2b_payload: dict[str, Any],
-    b2b_trace_file: str,
-    b2b_flow_type: str,
-    counterpart_payload: dict[str, Any],
-    counterpart_trace_file: str,
-    counterpart_flow_type: str,
-) -> str:
-    seed = '||'.join(
-        [
-            testcase_key,
-            b2b_flow_type,
-            stable_signature_ref(b2b_payload, b2b_trace_file),
-            counterpart_flow_type,
-            stable_signature_ref(counterpart_payload, counterpart_trace_file),
-            DATASET_BASENAME,
-        ]
-    )
-    return hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]
-
-
-def signature_meta(payload: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
-    return {
-        'trace_file': str(record.get('trace_file') or ''),
-        'best_flow_type': str(record.get('best_flow_type') or ''),
-        'bug_trace_length': int(record.get('bug_trace_length', 0) or 0),
-        'procedure': record.get('procedure'),
-        'primary_file': record.get('primary_file'),
-        'primary_line': record.get('primary_line'),
-        'signature_key': payload.get('key'),
-        'signature_hash': payload.get('hash'),
-    }
 
 
 def build_train_patched_counterparts(
@@ -212,9 +190,12 @@ def build_train_patched_counterparts(
     selection_summary_json: Path,
     overwrite: bool,
 ) -> dict[str, Any]:
-    pairs_jsonl = pair_dir / 'pairs.jsonl'
-    leftovers_jsonl = pair_dir / 'leftover_counterparts.jsonl'
-    source_split_manifest_json = dataset_export_dir / 'split_manifest.json'
+    pair_trace_paths = build_pair_trace_paths(pair_dir)
+    pairs_jsonl = pair_trace_paths['pairs_jsonl']
+    leftovers_jsonl = pair_trace_paths['leftover_counterparts_jsonl']
+    source_split_manifest_json = build_dataset_export_paths(dataset_export_dir)[
+        'split_manifest_json'
+    ]
     summary_json = selection_summary_json
 
     if not pairs_jsonl.exists():
@@ -292,32 +273,33 @@ def build_train_patched_counterparts(
             counterpart_payload=counterpart_payload,
             counterpart_trace_file=str(selected_leftover.get('trace_file') or ''),
             counterpart_flow_type=counterpart_flow_type,
+            dataset_namespace=DATASET_BASENAME,
         )
 
         b2b_export = dict(b2b_payload)
-        b2b_export['pairing_meta'] = {
-            'pair_id': pair_id,
-            'testcase_key': testcase_key,
-            'role': 'b2b',
-            'selection_reason': 'train_val_primary_pair',
-            'source_primary_pair_id': primary_pair.get('pair_id'),
-            'trace_file': str(primary_pair.get('b2b_trace_file') or ''),
-            'best_flow_type': str(primary_pair.get('b2b_flow_type') or ''),
-            'bug_trace_length': int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
-        }
+        b2b_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
+            testcase_key=testcase_key,
+            role='b2b',
+            selection_reason='train_val_primary_pair',
+            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
+            trace_file=str(primary_pair.get('b2b_trace_file') or ''),
+            best_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
+            bug_trace_length=int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
+        )
         counterpart_export = dict(counterpart_payload)
-        counterpart_export['pairing_meta'] = {
-            'pair_id': pair_id,
-            'testcase_key': testcase_key,
-            'role': 'counterpart',
-            'selection_reason': 'top_leftover_train_val',
-            'source_primary_pair_id': primary_pair.get('pair_id'),
-            'trace_file': str(selected_leftover.get('trace_file') or ''),
-            'best_flow_type': counterpart_flow_type,
-            'bug_trace_length': int(selected_leftover.get('bug_trace_length', 0) or 0),
-            'leftover_rank': 1,
-            'leftover_candidates_total': len(candidate_leftovers),
-        }
+        counterpart_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
+            testcase_key=testcase_key,
+            role='counterpart',
+            selection_reason='top_leftover_train_val',
+            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
+            trace_file=str(selected_leftover.get('trace_file') or ''),
+            best_flow_type=counterpart_flow_type,
+            bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
+            leftover_rank=1,
+            leftover_candidates_total=len(candidate_leftovers),
+        )
 
         b2b_output_path.write_text(
             json.dumps(b2b_export, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
@@ -343,7 +325,15 @@ def build_train_patched_counterparts(
                 'counterpart_bug_trace_length': int(
                     selected_leftover.get('bug_trace_length', 0) or 0
                 ),
-                'counterpart_signature': signature_meta(counterpart_payload, selected_leftover),
+                'counterpart_signature': build_signature_meta(
+                    payload=counterpart_payload,
+                    trace_file=str(selected_leftover.get('trace_file') or ''),
+                    best_flow_type=counterpart_flow_type,
+                    bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
+                    procedure=selected_leftover.get('procedure'),
+                    primary_file=selected_leftover.get('primary_file'),
+                    primary_line=selected_leftover.get('primary_line'),
+                ),
                 'output_files': {
                     'b2b': str(b2b_output_path),
                     counterpart_flow_type: str(counterpart_output_path),
@@ -393,6 +383,7 @@ def export_dataset(
     overwrite: bool,
     dedup_mode: str,
 ) -> dict[str, Any]:
+    export_paths = build_dataset_export_paths(dataset_export_dir, DATASET_BASENAME)
     return run_step07_export_wrapper(
         pairs=pairs,
         paired_signatures_dir=paired_signatures_dir,
@@ -408,7 +399,7 @@ def export_dataset(
             'paired_signatures_dir': str(paired_signatures_dir),
             'slice_dir': str(slice_dir),
             'output_dir': str(dataset_export_dir),
-            'csv_path': str(dataset_export_dir / f'{DATASET_BASENAME}.csv'),
+            'csv_path': str(export_paths['csv_path']),
         },
         split_manifest_metadata={
             'dataset_basename': DATASET_BASENAME,
@@ -445,8 +436,9 @@ def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDataset
         run_dir=params.run_dir,
         summary_metadata={'dataset_basename': DATASET_BASENAME},
     )
-    slice_dir = params.slice_output_dir / 'slice'
-    slice_summary_json = params.slice_output_dir / 'summary.json'
+    slice_stage_paths = build_slice_stage_paths(params.slice_output_dir)
+    slice_dir = slice_stage_paths['slice_dir']
+    slice_summary_json = slice_stage_paths['summary_json']
 
     export_result = export_dataset(
         pairs=selected['pairs'],
