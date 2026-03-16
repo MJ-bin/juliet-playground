@@ -17,10 +17,11 @@
 ## 주요 스크립트와 역할
 
 - `tools/run_pipeline.py`
-  - 전체 파이프라인과 stage별 실행을 한 곳에서 담당하는 기본 entrypoint
-  - 현재 subcommand: `full`, `stage01`, `stage02a`, `stage02b`, `stage03`, `stage03-signature`, `stage04`, `stage05`, `stage06`, `stage07`, `stage07b`
+  - 전체 파이프라인을 실행하는 기본 entrypoint
+  - 현재 공식 CLI는 `full`만 지원합니다.
 - `tools/stage/*.py`
-  - `run_pipeline.py`가 호출하는 importable stage 구현
+  - `run_pipeline.py full`이 호출하는 importable stage 구현
+  - stage 단위 재실행/실험은 이 모듈이나 `experiments/*/scripts/*.py`를 직접 사용합니다.
   - 현재 동작의 source of truth는 CLI help와 이 모듈들, 그리고 [`stage-contracts.md`](stage-contracts.md)입니다.
 - `tools/compare-artifacts.py`
   - pipeline run 디렉터리 또는 dataset export 디렉터리의 before/after 차이를 요약 비교하는 CLI

@@ -6,7 +6,8 @@
 ## 단일 Infer / Signature 산출물
 
 `python tools/run_pipeline.py stage03 ...` 또는
-`python tools/run_pipeline.py stage03-signature ...`를 독립 실행하면 기본적으로 아래 위치를 사용합니다.
+signature 생성은 `tools/stage/stage03_signature.py` helper를 통해 수행하며,
+기본 출력은 아래 위치를 사용합니다.
 
 ```text
 artifacts/
@@ -121,8 +122,8 @@ artifacts/pipeline-runs/run-YYYY.MM.DD-HH:MM:SS/
 ## 핵심 summary / log 파일
 
 - `run_summary.json`
-  - `run`, `inputs`, `config`, `steps`, `outputs`, `infer_summary` 의 nested 구조를 사용
-  - 선택된 taint config, step별 stdout/stderr 로그 경로, stage별 대표 산출물 경로를 포함
+  - `run`, `inputs`, `config`, `steps`, `outputs` 의 nested 구조를 사용
+  - 최소 상태/입력/대표 산출물 경로와 step 로그 경로를 포함
 - `03_infer_summary.json`
   - Infer run 디렉터리, signature 출력 경로, 결과 CSV/텍스트, target별 통계를 포함
 - `04_trace_flow/summary.json`
@@ -130,7 +131,7 @@ artifacts/pipeline-runs/run-YYYY.MM.DD-HH:MM:SS/
 - `05_pair_trace_ds/summary.json`
   - strict trace 수, pair 수, leftover counterpart 수, 선택된 flow type 분포를 포함
 - `07_dataset_export/summary.json`
-  - dedup 결과, token stats, source parse error, split counts를 포함
+  - dedup 결과, token stats, filtered pair reason, split counts를 포함
 - `07_dataset_export/train_patched_counterparts_summary.json`
   - patched counterpart export의 dedup/token/split 결과를 포함
 - `logs/<step>.stdout.log`, `logs/<step>.stderr.log`
