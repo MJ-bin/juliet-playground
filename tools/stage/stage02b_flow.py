@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from shared.artifact_layout import PathBundle
+from shared.artifact_layout import path_strings
 from shared.csvio import write_csv_rows
-from shared.jsonio import write_json, write_summary_json
+from shared.jsonio import write_json, write_stage_summary, write_summary_json
 from shared.jsonio import write_jsonl as _write_jsonl
 from shared.juliet_manifest import build_manifest_source_index
 
@@ -21,7 +21,7 @@ C_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
 def extract_function_inventory(
-    *, input_xml: Path, output_csv: Path, output_summary: Path
+    *, input_xml: Path, output_csv: Path, output_summary: Path | None = None
 ) -> dict[str, object]:
     if not input_xml.exists():
         raise FileNotFoundError(f'Input XML not found: {input_xml}')
@@ -78,11 +78,12 @@ def extract_function_inventory(
         ],
     }
 
-    write_summary_json(output_summary, summary, echo=False)
+    if output_summary is not None:
+        write_summary_json(output_summary, summary, echo=False)
 
     return {
         'output_csv': str(output_csv),
-        'output_summary': str(output_summary),
+        'output_summary': str(output_summary) if output_summary is not None else None,
         'total_comment_tags_seen': total_comment_tags_seen,
         'total_function_values': total_function_values,
         'unique_function_names': len(unique_names),
@@ -129,28 +130,6 @@ class FunctionRow:
             'operation_role': self.operation_role,
             'role_variant': self.role_variant,
         }
-
-
-@dataclass(frozen=True)
-class Stage02BOutputPaths(PathBundle):
-    output_dir: Path
-    function_names_unique_csv: Path
-    function_inventory_summary_json: Path
-    function_names_categorized_jsonl: Path
-    grouped_family_role_json: Path
-    category_summary_json: Path
-    manifest_with_testcase_flows_xml: Path
-    testcase_flow_summary_json: Path
-
-    _required_fields = (
-        'function_names_unique_csv',
-        'function_inventory_summary_json',
-        'function_names_categorized_jsonl',
-        'grouped_family_role_json',
-        'category_summary_json',
-        'manifest_with_testcase_flows_xml',
-        'testcase_flow_summary_json',
-    )
 
 
 @dataclass(frozen=True)
@@ -501,17 +480,15 @@ def build_summary(
     }
 
 
-def build_stage02b_output_paths(output_dir: Path) -> Stage02BOutputPaths:
-    return Stage02BOutputPaths(
-        output_dir=output_dir,
-        function_names_unique_csv=output_dir / 'function_names_unique.csv',
-        function_inventory_summary_json=output_dir / 'function_inventory_summary.json',
-        function_names_categorized_jsonl=output_dir / 'function_names_categorized.jsonl',
-        grouped_family_role_json=output_dir / 'grouped_family_role.json',
-        category_summary_json=output_dir / 'category_summary.json',
-        manifest_with_testcase_flows_xml=output_dir / 'manifest_with_testcase_flows.xml',
-        testcase_flow_summary_json=output_dir / 'testcase_flow_summary.json',
-    )
+def build_stage02b_output_paths(output_dir: Path) -> dict[str, Path]:
+    return {
+        'output_dir': output_dir,
+        'function_names_unique_csv': output_dir / 'function_names_unique.csv',
+        'function_names_categorized_jsonl': output_dir / 'function_names_categorized.jsonl',
+        'grouped_family_role_json': output_dir / 'grouped_family_role.json',
+        'manifest_with_testcase_flows_xml': output_dir / 'manifest_with_testcase_flows.xml',
+        'summary_json': output_dir / 'summary.json',
+    }
 
 
 def categorize_function_names(
@@ -521,7 +498,7 @@ def categorize_function_names(
     source_root: Path,
     output_jsonl: Path,
     output_nested_json: Path,
-    output_summary: Path,
+    output_summary: Path | None = None,
 ) -> dict[str, object]:
     validate_categorize_inputs(
         input_csv=input_csv,
@@ -560,12 +537,13 @@ def categorize_function_names(
         variant_groups=variant_groups,
         family_role_groups=family_role_groups,
     )
-    write_summary_json(output_summary, summary, echo=False)
+    if output_summary is not None:
+        write_summary_json(output_summary, summary, echo=False)
 
     return {
         'output_jsonl': str(output_jsonl),
         'output_nested_json': str(output_nested_json),
-        'output_summary': str(output_summary),
+        'output_summary': str(output_summary) if output_summary is not None else None,
         'total_unique_function_names': len(rows),
         'total_weighted_count': sum(r.count for r in rows),
     }
@@ -755,7 +733,7 @@ def add_flow_tags_to_testcase(
     input_xml: Path,
     function_categories_jsonl: Path,
     output_xml: Path,
-    summary_json: Path,
+    summary_json: Path | None = None,
 ) -> dict[str, object]:
     if not input_xml.exists():
         raise FileNotFoundError(f'Input XML not found: {input_xml}')
@@ -788,44 +766,34 @@ def run_stage02b_flow(
     input_xml: Path,
     source_root: Path,
     output_dir: Path,
-    minimal_outputs: bool = False,
 ) -> dict[str, object]:
     output_paths = build_stage02b_output_paths(output_dir)
 
-    if minimal_outputs:
-        partition_result = build_minimal_flow_manifest(
-            input_xml=input_xml,
-            output_xml=output_paths.manifest_with_testcase_flows_xml,
-        )
-        return {
-            'output_dir': str(output_paths.output_dir),
-            'manifest_with_testcase_flows_xml': str(output_paths.manifest_with_testcase_flows_xml),
-            'partition_result': partition_result,
-        }
-
-    extract_result = extract_function_inventory(
+    extract_function_inventory(
         input_xml=input_xml,
-        output_csv=output_paths.function_names_unique_csv,
-        output_summary=output_paths.function_inventory_summary_json,
+        output_csv=output_paths['function_names_unique_csv'],
+        output_summary=None,
     )
     categorize_result = categorize_function_names(
-        input_csv=output_paths.function_names_unique_csv,
+        input_csv=output_paths['function_names_unique_csv'],
         manifest_xml=input_xml,
         source_root=source_root,
-        output_jsonl=output_paths.function_names_categorized_jsonl,
-        output_nested_json=output_paths.grouped_family_role_json,
-        output_summary=output_paths.category_summary_json,
+        output_jsonl=output_paths['function_names_categorized_jsonl'],
+        output_nested_json=output_paths['grouped_family_role_json'],
+        output_summary=None,
     )
     partition_result = add_flow_tags_to_testcase(
         input_xml=input_xml,
-        function_categories_jsonl=output_paths.function_names_categorized_jsonl,
-        output_xml=output_paths.manifest_with_testcase_flows_xml,
-        summary_json=output_paths.testcase_flow_summary_json,
+        function_categories_jsonl=output_paths['function_names_categorized_jsonl'],
+        output_xml=output_paths['manifest_with_testcase_flows_xml'],
+        summary_json=None,
     )
 
-    return {
-        **output_paths.to_payload(include=('output_dir', *output_paths._required_fields)),
-        'extract_result': extract_result,
-        'categorize_result': categorize_result,
-        'partition_result': partition_result,
+    artifacts = path_strings(output_paths)
+    stats = {
+        'total_unique_function_names': int(categorize_result['total_unique_function_names']),
+        'total_weighted_count': int(categorize_result['total_weighted_count']),
+        'testcases': int(partition_result['testcases']),
     }
+    write_stage_summary(output_paths['summary_json'], artifacts=artifacts, stats=stats, echo=False)
+    return {'artifacts': artifacts, 'stats': stats}

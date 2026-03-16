@@ -13,7 +13,6 @@ from shared.artifact_layout import (
     TRAIN_PATCHED_COUNTERPARTS_BASENAME,
     build_dataset_export_paths,
     build_pair_trace_paths,
-    build_patched_pairing_paths,
 )
 from shared.jsonio import load_json, load_jsonl
 
@@ -27,45 +26,15 @@ VOLATILE_KEYS = {
     'pairs_jsonl',
     'paired_signatures_dir',
     'slice_dir',
-    'dedup_dropped_csv',
     'split_manifest_json',
     'csv_path',
-    'token_counts_csv',
-    'token_distribution_png',
-    'normalized_token_counts_csv',
-    'real_vul_data_csv',
-    'source_pairs_jsonl',
-    'source_leftover_counterparts_jsonl',
-    'source_split_manifest_json',
-    'signature_output_dir',
-    'output_pairs_jsonl',
-    'selection_summary_json',
-    'metadata_json',
-    'step07_summary_json',
-    'step07_split_manifest_json',
-    'step07b_summary_json',
-    'slice_summary_json',
     'summary_json',
-    'slice_output_dir',
-    'signature_db_dir',
-    'dataset_export_dir',
-    'run_dir',
-    'pipeline_root',
-    'infer_results_root',
     'infer_run_dir',
-    'signatures_root',
     'signature_output_dir',
     'signature_non_empty_dir',
-    'analysis_result_csv',
-    'analysis_no_issue_files',
-    'stdout_log',
-    'stderr_log',
-    'input_manifest',
-    'source_root',
-    'committed_taint_config_path',
-    'generated_taint_config_path',
-    'selected_taint_config_path',
-    'trace_jsonl',
+    'trace_flow_match_strict_jsonl',
+    'pulse_taint_config',
+    'source_sink_candidate_map',
 }
 
 
@@ -99,9 +68,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('before', type=Path, help='Before artifact directory')
     parser.add_argument('after', type=Path, help='After artifact directory')
-    parser.add_argument(
-        '--limit', type=int, default=20, help='Max preview entries per changed section'
-    )
+    parser.add_argument('--limit', type=int, default=20, help='Max preview entries per changed section')
     return parser.parse_args()
 
 
@@ -110,12 +77,12 @@ def detect_artifact_kind(path: Path) -> str:
     if not path.exists() or not path.is_dir():
         raise FileNotFoundError(f'Artifact path not found or not a directory: {path}')
     primary_dataset_paths = build_dataset_export_paths(path)
-    if (path / 'run_summary.json').exists():
+    if (path / '03_infer_summary.json').exists() or (path / '05_pair_trace_ds').exists():
         return 'pipeline_run'
     if (
-        primary_dataset_paths.summary_json.exists()
-        and primary_dataset_paths.split_manifest_json.exists()
-        and primary_dataset_paths.csv_path.exists()
+        primary_dataset_paths['summary_json'].exists()
+        and primary_dataset_paths['split_manifest_json'].exists()
+        and primary_dataset_paths['csv_path'].exists()
     ):
         return 'dataset_export'
     raise ValueError(
@@ -179,23 +146,6 @@ def make_real_vul_key(row: dict[str, str]) -> tuple[str, str, str, str]:
     )
 
 
-def make_dedup_key(row: dict[str, str]) -> tuple[str, str, str, str]:
-    return (
-        str(row.get('role') or ''),
-        str(row.get('source_signature_path') or ''),
-        str(row.get('normalized_code_hash') or ''),
-        str(row.get('dedup_reason') or ''),
-    )
-
-
-def make_token_count_key(row: dict[str, str]) -> tuple[str, str, str]:
-    return (
-        str(row.get('pair_id') or ''),
-        str(row.get('role') or ''),
-        str(row.get('filename') or ''),
-    )
-
-
 def preview(items: list[str], limit: int) -> list[str]:
     return items[:limit]
 
@@ -256,10 +206,8 @@ def report_keyed_csv_diff(
 def project_pair(row: dict[str, Any]) -> dict[str, Any]:
     return {
         'counterpart_flow_type': row.get('counterpart_flow_type'),
-        'b2b_bug_trace_length': row.get('b2b_bug_trace_length'),
-        'counterpart_bug_trace_length': row.get('counterpart_bug_trace_length'),
-        'b2b_procedure': (row.get('b2b_signature') or {}).get('procedure'),
-        'counterpart_procedure': (row.get('counterpart_signature') or {}).get('procedure'),
+        'b2b_path': row.get('b2b_path'),
+        'counterpart_path': row.get('counterpart_path'),
     }
 
 
@@ -306,9 +254,7 @@ def report_leftovers_diff(reporter: Reporter, before_path: Path, after_path: Pat
                 (
                     row.get('best_flow_type'),
                     row.get('bug_trace_length'),
-                    row.get('procedure'),
-                    row.get('primary_file'),
-                    row.get('primary_line'),
+                    row.get('trace_file'),
                 )
             )
         for key in target:
@@ -339,36 +285,22 @@ def compare_dataset_export(before_dir: Path, after_dir: Path, reporter: Reporter
         after_paths = build_dataset_export_paths(after_dir, dataset_basename)
         report_json_diff(
             reporter,
-            before_paths.summary_json.name,
-            before_paths.summary_json,
-            after_paths.summary_json,
+            before_paths['summary_json'].name,
+            before_paths['summary_json'],
+            after_paths['summary_json'],
         )
         report_json_diff(
             reporter,
-            before_paths.split_manifest_json.name,
-            before_paths.split_manifest_json,
-            after_paths.split_manifest_json,
+            before_paths['split_manifest_json'].name,
+            before_paths['split_manifest_json'],
+            after_paths['split_manifest_json'],
         )
         report_keyed_csv_diff(
             reporter,
-            before_paths.csv_path.name,
-            before_paths.csv_path,
-            after_paths.csv_path,
+            before_paths['csv_path'].name,
+            before_paths['csv_path'],
+            after_paths['csv_path'],
             make_real_vul_key,
-        )
-        report_keyed_csv_diff(
-            reporter,
-            before_paths.dedup_dropped_csv.name,
-            before_paths.dedup_dropped_csv,
-            after_paths.dedup_dropped_csv,
-            make_dedup_key,
-        )
-        report_keyed_csv_diff(
-            reporter,
-            before_paths.token_counts_csv.name,
-            before_paths.token_counts_csv,
-            after_paths.token_counts_csv,
-            make_token_count_key,
         )
 
 
@@ -376,33 +308,31 @@ def compare_pair_trace(before_dir: Path, after_dir: Path, reporter: Reporter) ->
     reporter.section('Pair Trace Dataset')
     before_paths = build_pair_trace_paths(before_dir)
     after_paths = build_pair_trace_paths(after_dir)
-    before_patched_paths = build_patched_pairing_paths(before_dir)
-    after_patched_paths = build_patched_pairing_paths(after_dir)
     report_json_diff(
         reporter,
-        before_paths.summary_json.name,
-        before_paths.summary_json,
-        after_paths.summary_json,
+        before_paths['summary_json'].name,
+        before_paths['summary_json'],
+        after_paths['summary_json'],
     )
     report_pairs_jsonl_diff(
         reporter,
-        before_paths.pairs_jsonl,
-        after_paths.pairs_jsonl,
+        before_paths['pairs_jsonl'],
+        after_paths['pairs_jsonl'],
     )
     report_leftovers_diff(
         reporter,
-        before_paths.leftover_counterparts_jsonl,
-        after_paths.leftover_counterparts_jsonl,
-    )
-    report_json_diff(
-        reporter,
-        before_patched_paths.selection_summary_json.name,
-        before_patched_paths.selection_summary_json,
-        after_patched_paths.selection_summary_json,
+        before_paths['leftover_counterparts_jsonl'],
+        after_paths['leftover_counterparts_jsonl'],
     )
 
 
 def compare_pipeline_runs(before_run: Path, after_run: Path, reporter: Reporter) -> None:
+    report_json_diff(
+        reporter,
+        '03_infer_summary.json',
+        before_run / '03_infer_summary.json',
+        after_run / '03_infer_summary.json',
+    )
     compare_pair_trace(
         before_run / '05_pair_trace_ds',
         after_run / '05_pair_trace_ds',

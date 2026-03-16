@@ -8,7 +8,7 @@ from pathlib import Path
 
 from shared.csvio import write_csv_rows
 from shared.dataset_sources import load_tree_sitter_parsers
-from shared.jsonio import write_json, write_jsonl, write_summary_json
+from shared.jsonio import write_json, write_jsonl, write_stage_summary
 from shared.juliet_manifest import build_manifest_source_index
 from shared.source_parsing import PARSER_LANG_BY_SUFFIX, SOURCE_EXTS, node_first_line_text
 
@@ -423,19 +423,6 @@ def write_outputs(outputs: TaintExtractionOutputs) -> Counter[str]:
         encoding='utf-8',
     )
 
-    summary = {
-        'total_code_entries': len(outputs.all_comment_codes),
-        'unique_code_entries': len(outputs.counts),
-        'max_frequency': max(outputs.counts.values()) if outputs.counts else 0,
-        'candidate_map_keys': len(outputs.candidate_map),
-        'keys_with_calls': sum(1 for v in outputs.candidate_map.values() if v),
-        'unique_function_names': len(function_name_counts),
-        'total_function_name_occurrences': sum(function_name_counts.values()),
-        'duplicate_key_skipped': outputs.duplicate_key_skipped,
-        'flaw_records_processed': outputs.flaw_records_processed,
-        **outputs.extra_stats,
-    }
-    write_summary_json(outputs.output_dir / 'summary.json', summary, echo=False)
     return function_name_counts
 
 
@@ -445,7 +432,6 @@ def extract_unique_code_fields(
     source_root: Path,
     output_dir: Path,
     pulse_taint_config_output: Path | None = None,
-    minimal_outputs: bool = False,
 ) -> dict[str, object]:
     if not input_xml.exists():
         raise FileNotFoundError(f'Input XML not found: {input_xml}')
@@ -518,42 +504,38 @@ def extract_unique_code_fields(
     output_dir.mkdir(parents=True, exist_ok=True)
     macro_dump_stats = _build_global_macro_dump_stats(macro_defs)
     macro_stats = _build_macro_resolution_stats(resolution_map)
-    if not minimal_outputs:
-        _write_global_macro_dump(output_dir, macro_defs)
-        _write_macro_resolution_csv(output_dir, resolution_map)
+    _write_global_macro_dump(output_dir, macro_defs)
+    _write_macro_resolution_csv(output_dir, resolution_map)
     extra_stats = {**macro_dump_stats, **macro_stats}
 
-    function_name_counts = _count_function_names(candidate_map)
-    if not minimal_outputs:
-        function_name_counts = write_outputs(
-            TaintExtractionOutputs(
-                output_dir=output_dir,
-                all_comment_codes=all_comment_codes,
-                counts=counts,
-                candidate_map=candidate_map,
-                duplicate_key_skipped=duplicate_key_skipped,
-                flaw_records_processed=flaw_records_processed,
-                extra_stats=extra_stats,
-            )
+    function_name_counts = write_outputs(
+        TaintExtractionOutputs(
+            output_dir=output_dir,
+            all_comment_codes=all_comment_codes,
+            counts=counts,
+            candidate_map=candidate_map,
+            duplicate_key_skipped=duplicate_key_skipped,
+            flaw_records_processed=flaw_records_processed,
+            extra_stats=extra_stats,
         )
+    )
 
     pulse_output_path = pulse_taint_config_output or (output_dir / DEFAULT_PULSE_TAINT_CONFIG_NAME)
     pulse_stats = _write_pulse_taint_config(pulse_output_path, function_name_counts)
 
-    return {
-        'input_xml': str(input_xml),
-        'source_root': str(source_root),
-        'output_dir': str(output_dir),
+    artifacts = {
+        'pulse_taint_config': str(pulse_output_path),
+        'source_sink_candidate_map': str(output_dir / 'source_sink_candidate_map.json'),
+        'summary_json': str(output_dir / 'summary.json'),
+    }
+    stats = {
         'total_code_entries': len(all_comment_codes),
-        'unique_code_entries': len(counts),
-        'max_frequency': max(counts.values()) if counts else 0,
         'candidate_map_keys': len(candidate_map),
         'keys_with_calls': sum(1 for v in candidate_map.values() if v),
         'unique_function_names': len(function_name_counts),
-        'total_function_name_occurrences': sum(function_name_counts.values()),
         'duplicate_key_skipped': duplicate_key_skipped,
         'flaw_records_processed': flaw_records_processed,
-        'pulse_taint_config_output': str(pulse_output_path),
-        **extra_stats,
         **pulse_stats,
     }
+    write_stage_summary(output_dir / 'summary.json', artifacts=artifacts, stats=stats, echo=False)
+    return {'artifacts': artifacts, 'stats': stats}

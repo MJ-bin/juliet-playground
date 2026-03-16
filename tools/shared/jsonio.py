@@ -76,3 +76,33 @@ def write_jsonl(
             f.write(json.dumps(row, ensure_ascii=ensure_ascii))
         if trailing_newline:
             f.write('\n')
+
+
+
+def build_stage_summary(
+    *,
+    artifacts: dict[str, Any],
+    stats: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(extra or {})
+    payload['artifacts'] = artifacts
+    payload['stats'] = stats
+    return payload
+
+
+
+def write_stage_summary(
+    path: Path,
+    *,
+    artifacts: dict[str, Any],
+    stats: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+    echo: bool = True,
+    ensure_ascii: bool = False,
+) -> dict[str, Any]:
+    payload = build_stage_summary(artifacts=artifacts, stats=stats, extra=extra)
+    write_json(path, payload, ensure_ascii=ensure_ascii)
+    if echo:
+        print(json.dumps(payload, ensure_ascii=ensure_ascii))
+    return payload

@@ -2,38 +2,13 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from shared.artifact_layout import DatasetExportPaths, build_dataset_export_paths
+from shared.artifact_layout import build_dataset_export_paths
 from shared.dataset_export_core import DatasetExportRequest, run_configured_step07_export
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
 from shared.jsonio import load_jsonl as _load_jsonl
-
-
-@dataclass(frozen=True)
-class PrimaryDatasetExportParams:
-    pairs_jsonl: Path
-    paired_signatures_dir: Path
-    slice_dir: Path
-    output_dir: Path
-    split_seed: int
-    train_ratio: float
-    dedup_mode: str
-    minimal_outputs: bool = False
-
-
-@dataclass(frozen=True)
-class PrimaryDatasetExportResult:
-    dataset: DatasetExportPaths
-    minimal_outputs: bool = False
-
-    def to_payload(self) -> dict[str, object]:
-        include = ('output_dir', 'csv_path', 'normalized_slices_dir', 'split_manifest_json')
-        if not self.minimal_outputs:
-            include = None
-        return {'dataset': self.dataset.to_payload(include=include)}
 
 
 def load_pairs_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -65,30 +40,37 @@ def compute_pair_split(pair_ids: list[str], train_ratio: float, seed: int) -> di
     return split_map
 
 
-def export_primary_dataset(params: PrimaryDatasetExportParams) -> PrimaryDatasetExportResult:
-    if not params.pairs_jsonl.exists():
-        raise FileNotFoundError(f'Pairs JSONL not found: {params.pairs_jsonl}')
-    if not (0.0 < params.train_ratio < 1.0):
-        raise ValueError(f'train_ratio must be between 0 and 1: {params.train_ratio}')
+def export_primary_dataset(
+    *,
+    pairs_jsonl: Path,
+    paired_signatures_dir: Path,
+    slice_dir: Path,
+    output_dir: Path,
+    split_seed: int,
+    train_ratio: float,
+    dedup_mode: str,
+) -> dict[str, Any]:
+    if not pairs_jsonl.exists():
+        raise FileNotFoundError(f'Pairs JSONL not found: {pairs_jsonl}')
+    if not (0.0 < train_ratio < 1.0):
+        raise ValueError(f'train_ratio must be between 0 and 1: {train_ratio}')
 
-    pairs = load_pairs_jsonl(params.pairs_jsonl)
-    dataset_paths = build_dataset_export_paths(params.output_dir)
-    run_configured_step07_export(
+    pairs = load_pairs_jsonl(pairs_jsonl)
+    export_paths = build_dataset_export_paths(output_dir)
+    return run_configured_step07_export(
         DatasetExportRequest(
             pairs=pairs,
-            paired_signatures_dir=params.paired_signatures_dir,
-            slice_dir=params.slice_dir,
-            export_paths=dataset_paths,
-            dedup_mode=params.dedup_mode,
-            minimal_outputs=params.minimal_outputs,
+            paired_signatures_dir=paired_signatures_dir,
+            slice_dir=slice_dir,
+            export_paths=export_paths,
+            dedup_mode=dedup_mode,
             split_assignments_fn=lambda pair_ids: compute_pair_split(
-                pair_ids, train_ratio=params.train_ratio, seed=params.split_seed
+                pair_ids, train_ratio=train_ratio, seed=split_seed
             ),
             collect_defined_function_names_fn=collect_defined_function_names,
             build_source_file_candidates_fn=build_source_file_candidates,
         )
     )
-    return PrimaryDatasetExportResult(dataset=dataset_paths, minimal_outputs=params.minimal_outputs)
 
 
 def export_dataset_from_pipeline(
@@ -100,15 +82,13 @@ def export_dataset_from_pipeline(
     split_seed: int,
     train_ratio: float,
     dedup_mode: str,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return export_primary_dataset(
-        PrimaryDatasetExportParams(
-            pairs_jsonl=pairs_jsonl,
-            paired_signatures_dir=paired_signatures_dir,
-            slice_dir=slice_dir,
-            output_dir=output_dir,
-            split_seed=split_seed,
-            train_ratio=train_ratio,
-            dedup_mode=dedup_mode,
-        )
-    ).to_payload()
+        pairs_jsonl=pairs_jsonl,
+        paired_signatures_dir=paired_signatures_dir,
+        slice_dir=slice_dir,
+        output_dir=output_dir,
+        split_seed=split_seed,
+        train_ratio=train_ratio,
+        dedup_mode=dedup_mode,
+    )

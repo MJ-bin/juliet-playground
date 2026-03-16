@@ -2,30 +2,22 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from shared import fs as _fs_utils
 from shared.artifact_layout import (
     TRAIN_PATCHED_COUNTERPARTS_BASENAME,
-    DatasetExportPaths,
-    PatchedPairingPaths,
-    SliceStagePaths,
     build_dataset_export_paths,
     build_pair_trace_paths,
     build_patched_pairing_paths,
     build_slice_stage_paths,
+    path_strings,
 )
 from shared.dataset_export_core import DatasetExportRequest, run_configured_step07_export
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
-from shared.jsonio import load_jsonl, write_json, write_jsonl, write_summary_json
-from shared.pairing import (
-    build_pairing_meta,
-    build_signature_meta,
-    build_trace_priority_key,
-    make_pair_id,
-)
+from shared.jsonio import load_json, load_jsonl, write_json, write_jsonl
+from shared.pairing import build_trace_priority_key, make_pair_id
 from shared.signatures import load_signature_payload
 
 from stage.stage06_slices import generate_slices
@@ -34,69 +26,21 @@ DATASET_BASENAME = TRAIN_PATCHED_COUNTERPARTS_BASENAME
 prepare_target = _fs_utils.prepare_target
 
 
-@dataclass(frozen=True)
-class PatchedDatasetExportParams:
-    run_dir: Path
-    dedup_mode: str
-
-
-@dataclass(frozen=True)
-class Stage07BPaths:
-    run_dir: Path
-    pair_dir: Path
-    dataset_export_dir: Path
-    pairing: PatchedPairingPaths
-    slices: SliceStagePaths
-    dataset: DatasetExportPaths
-    primary_split_manifest_json: Path
-
-
-@dataclass(frozen=True)
-class PatchedPairingSelectionResult:
-    pairs: list[dict[str, Any]]
-    pairing: PatchedPairingPaths
-    selection_counts: dict[str, int]
-
-
-@dataclass(frozen=True)
-class PatchedDatasetExportResult:
-    dataset_basename: str
-    run_dir: Path
-    pair_dir: Path
-    pairing: PatchedPairingPaths
-    slices: SliceStagePaths
-    dataset: DatasetExportPaths
-    dedup_mode: str
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            'dataset_basename': self.dataset_basename,
-            'run_dir': str(self.run_dir),
-            'pair_dir': str(self.pair_dir),
-            'dedup_mode': self.dedup_mode,
-            'pairing': self.pairing.to_payload(),
-            'slices': self.slices.to_payload(),
-            'dataset': self.dataset.to_payload(),
-        }
-
-
-def build_stage07b_paths(run_dir: Path) -> Stage07BPaths:
+def build_stage07b_paths(run_dir: Path) -> dict[str, Any]:
     resolved_run_dir = run_dir.resolve()
     pair_dir = resolved_run_dir / '05_pair_trace_ds'
     dataset_export_dir = resolved_run_dir / '07_dataset_export'
-    pairing = build_patched_pairing_paths(pair_dir, DATASET_BASENAME)
-    slices = build_slice_stage_paths(resolved_run_dir / '06_slices' / DATASET_BASENAME)
-    dataset = build_dataset_export_paths(dataset_export_dir, DATASET_BASENAME)
-    primary_dataset = build_dataset_export_paths(dataset_export_dir)
-    return Stage07BPaths(
-        run_dir=resolved_run_dir,
-        pair_dir=pair_dir,
-        dataset_export_dir=dataset_export_dir,
-        pairing=pairing,
-        slices=slices,
-        dataset=dataset,
-        primary_split_manifest_json=primary_dataset.split_manifest_json,
-    )
+    return {
+        'run_dir': resolved_run_dir,
+        'pair_dir': pair_dir,
+        'dataset_export_dir': dataset_export_dir,
+        'pairing': build_patched_pairing_paths(pair_dir, DATASET_BASENAME),
+        'slices': build_slice_stage_paths(resolved_run_dir / '06_slices' / DATASET_BASENAME),
+        'dataset': build_dataset_export_paths(dataset_export_dir, DATASET_BASENAME),
+        'primary_split_manifest_json': build_dataset_export_paths(dataset_export_dir)[
+            'split_manifest_json'
+        ],
+    }
 
 
 def leftover_sort_key(record: dict[str, Any]) -> tuple[Any, ...]:
@@ -104,45 +48,52 @@ def leftover_sort_key(record: dict[str, Any]) -> tuple[Any, ...]:
         bug_trace_length=int(record.get('bug_trace_length', 0) or 0),
         trace_file=str(record.get('trace_file') or ''),
         best_flow_type=str(record.get('best_flow_type') or ''),
-        procedure=record.get('procedure'),
+        procedure=None,
     )
 
 
-def build_train_patched_counterparts(*, run_dir: Path) -> PatchedPairingSelectionResult:
+def _selection_stats(selection_counts: Counter[str], train_val_pair_ids_total: int) -> dict[str, Any]:
+    return {
+        'counts': dict(selection_counts),
+        'train_val_pair_ids_total': train_val_pair_ids_total,
+        'selected_testcases': int(selection_counts.get('selected_pairs', 0)),
+    }
+
+
+def build_train_patched_counterparts(*, run_dir: Path) -> dict[str, Any]:
     paths = build_stage07b_paths(run_dir)
-    pair_trace_paths = build_pair_trace_paths(paths.pair_dir)
+    pair_trace_paths = build_pair_trace_paths(paths['pair_dir'])
 
-    if not pair_trace_paths.pairs_jsonl.exists():
-        raise FileNotFoundError(f'Pairs JSONL not found: {pair_trace_paths.pairs_jsonl}')
-    if not pair_trace_paths.leftover_counterparts_jsonl.exists():
+    if not pair_trace_paths['pairs_jsonl'].exists():
+        raise FileNotFoundError(f"Pairs JSONL not found: {pair_trace_paths['pairs_jsonl']}")
+    if not pair_trace_paths['leftover_counterparts_jsonl'].exists():
         raise FileNotFoundError(
-            f'Leftover counterparts JSONL not found: {pair_trace_paths.leftover_counterparts_jsonl}'
+            'Leftover counterparts JSONL not found: '
+            f"{pair_trace_paths['leftover_counterparts_jsonl']}"
         )
-    if not paths.primary_split_manifest_json.exists():
+    if not paths['primary_split_manifest_json'].exists():
         raise FileNotFoundError(
-            f'Primary split manifest not found: {paths.primary_split_manifest_json}'
+            f"Primary split manifest not found: {paths['primary_split_manifest_json']}"
         )
 
-    prepare_target(paths.pairing.signatures_dir, overwrite=False)
-    prepare_target(paths.pairing.pairs_jsonl, overwrite=False)
-    prepare_target(paths.pairing.selection_summary_json, overwrite=False)
-    paths.pairing.signatures_dir.mkdir(parents=True, exist_ok=True)
-    paths.pairing.pairs_jsonl.parent.mkdir(parents=True, exist_ok=True)
-    paths.pairing.selection_summary_json.parent.mkdir(parents=True, exist_ok=True)
+    prepare_target(paths['pairing']['signatures_dir'], overwrite=False)
+    prepare_target(paths['pairing']['pairs_jsonl'], overwrite=False)
+    paths['pairing']['signatures_dir'].mkdir(parents=True, exist_ok=True)
+    paths['pairing']['pairs_jsonl'].parent.mkdir(parents=True, exist_ok=True)
 
-    split_manifest = json.loads(paths.primary_split_manifest_json.read_text(encoding='utf-8'))
+    split_manifest = json.loads(paths['primary_split_manifest_json'].read_text(encoding='utf-8'))
     train_val_pair_ids = set(split_manifest.get('pair_ids', {}).get('train_val') or [])
     if not train_val_pair_ids:
-        raise ValueError(f'No train_val pair_ids found in {paths.primary_split_manifest_json}')
+        raise ValueError(f"No train_val pair_ids found in {paths['primary_split_manifest_json']}")
 
-    primary_pairs = load_jsonl(pair_trace_paths.pairs_jsonl)
+    primary_pairs = load_jsonl(pair_trace_paths['pairs_jsonl'])
     primary_pairs_by_testcase = {
         str(pair.get('testcase_key') or ''): pair
         for pair in primary_pairs
         if str(pair.get('pair_id') or '') in train_val_pair_ids
     }
 
-    leftovers = load_jsonl(pair_trace_paths.leftover_counterparts_jsonl)
+    leftovers = load_jsonl(pair_trace_paths['leftover_counterparts_jsonl'])
     leftovers_by_testcase: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in leftovers:
         testcase_key = str(record.get('testcase_key') or '')
@@ -162,7 +113,10 @@ def build_train_patched_counterparts(*, run_dir: Path) -> PatchedPairingSelectio
             continue
 
         selected_leftover = candidate_leftovers[0]
-        b2b_signature_path = Path(str((primary_pair.get('output_files') or {}).get('b2b') or ''))
+        output_files = primary_pair.get('output_files') or {}
+        b2b_signature_path = Path(
+            str(primary_pair.get('b2b_path') or output_files.get('b2b') or '')
+        )
         counterpart_trace_path = Path(str(selected_leftover.get('trace_file') or ''))
         if not b2b_signature_path.exists():
             selection_counts['skipped_missing_b2b_signature'] += 1
@@ -171,86 +125,39 @@ def build_train_patched_counterparts(*, run_dir: Path) -> PatchedPairingSelectio
             selection_counts['skipped_missing_counterpart_signature'] += 1
             continue
 
-        b2b_payload = load_signature_payload(b2b_signature_path)
-        counterpart_payload = load_signature_payload(counterpart_trace_path)
         counterpart_flow_type = str(selected_leftover.get('best_flow_type') or '').strip()
         if not counterpart_flow_type:
             selection_counts['skipped_missing_counterpart_flow_type'] += 1
             continue
 
+        b2b_payload = load_signature_payload(b2b_signature_path)
+        counterpart_payload = load_signature_payload(counterpart_trace_path)
         pair_id = make_pair_id(
             testcase_key=testcase_key,
             b2b_payload=b2b_payload,
-            b2b_trace_file=str(primary_pair.get('b2b_trace_file') or ''),
-            b2b_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
+            b2b_trace_file=str(b2b_signature_path),
+            b2b_flow_type='b2b',
             counterpart_payload=counterpart_payload,
-            counterpart_trace_file=str(selected_leftover.get('trace_file') or ''),
+            counterpart_trace_file=str(counterpart_trace_path),
             counterpart_flow_type=counterpart_flow_type,
             dataset_namespace=DATASET_BASENAME,
         )
 
-        testcase_dir = paths.pairing.signatures_dir / testcase_key
+        testcase_dir = paths['pairing']['signatures_dir'] / testcase_key
         testcase_dir.mkdir(parents=True, exist_ok=True)
         b2b_output_path = testcase_dir / 'b2b.json'
         counterpart_output_path = testcase_dir / f'{counterpart_flow_type}.json'
-
-        b2b_export = dict(b2b_payload)
-        b2b_export['pairing_meta'] = build_pairing_meta(
-            pair_id=pair_id,
-            testcase_key=testcase_key,
-            role='b2b',
-            selection_reason='train_val_primary_pair',
-            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
-            trace_file=str(primary_pair.get('b2b_trace_file') or ''),
-            best_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
-            bug_trace_length=int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
-        )
-        counterpart_export = dict(counterpart_payload)
-        counterpart_export['pairing_meta'] = build_pairing_meta(
-            pair_id=pair_id,
-            testcase_key=testcase_key,
-            role='counterpart',
-            selection_reason='top_leftover_train_val',
-            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
-            trace_file=str(selected_leftover.get('trace_file') or ''),
-            best_flow_type=counterpart_flow_type,
-            bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
-            leftover_rank=1,
-            leftover_candidates_total=len(candidate_leftovers),
-        )
-
-        write_json(b2b_output_path, b2b_export)
-        write_json(counterpart_output_path, counterpart_export)
+        write_json(b2b_output_path, b2b_payload)
+        write_json(counterpart_output_path, counterpart_payload)
 
         selected_pairs.append(
             {
                 'pair_id': pair_id,
                 'testcase_key': testcase_key,
-                'selection_reason': 'top_leftover_train_val',
                 'source_primary_pair_id': primary_pair.get('pair_id'),
-                'source_primary_dataset_type': 'train_val',
-                'b2b_flow_type': str(primary_pair.get('b2b_flow_type') or ''),
-                'b2b_trace_file': str(primary_pair.get('b2b_trace_file') or ''),
-                'b2b_bug_trace_length': int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
-                'b2b_signature': primary_pair.get('b2b_signature'),
                 'counterpart_flow_type': counterpart_flow_type,
-                'counterpart_trace_file': str(selected_leftover.get('trace_file') or ''),
-                'counterpart_bug_trace_length': int(
-                    selected_leftover.get('bug_trace_length', 0) or 0
-                ),
-                'counterpart_signature': build_signature_meta(
-                    payload=counterpart_payload,
-                    trace_file=str(selected_leftover.get('trace_file') or ''),
-                    best_flow_type=counterpart_flow_type,
-                    bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
-                    procedure=selected_leftover.get('procedure'),
-                    primary_file=selected_leftover.get('primary_file'),
-                    primary_line=selected_leftover.get('primary_line'),
-                ),
-                'output_files': {
-                    'b2b': str(b2b_output_path),
-                    counterpart_flow_type: str(counterpart_output_path),
-                },
+                'b2b_path': str(b2b_output_path),
+                'counterpart_path': str(counterpart_output_path),
             }
         )
         selection_counts['selected_pairs'] += 1
@@ -258,20 +165,12 @@ def build_train_patched_counterparts(*, run_dir: Path) -> PatchedPairingSelectio
         if len(candidate_leftovers) > 1:
             selection_counts['selected_pairs_with_extra_leftovers'] += 1
 
-    write_jsonl(paths.pairing.pairs_jsonl, selected_pairs)
-
-    summary_payload = {
-        'dataset_basename': DATASET_BASENAME,
-        'counts': dict(selection_counts),
-        'train_val_pair_ids_total': len(train_val_pair_ids),
-        'selected_testcases': len(selected_pairs),
+    write_jsonl(paths['pairing']['pairs_jsonl'], selected_pairs)
+    return {
+        'pairs': selected_pairs,
+        'artifacts': path_strings(paths['pairing']),
+        'stats': _selection_stats(selection_counts, len(train_val_pair_ids)),
     }
-    write_summary_json(paths.pairing.selection_summary_json, summary_payload)
-    return PatchedPairingSelectionResult(
-        pairs=selected_pairs,
-        pairing=paths.pairing,
-        selection_counts=dict(selection_counts),
-    )
 
 
 def export_dataset(
@@ -279,10 +178,10 @@ def export_dataset(
     pairs: list[dict[str, Any]],
     paired_signatures_dir: Path,
     slice_dir: Path,
-    dataset_paths: DatasetExportPaths,
+    dataset_paths: dict[str, Path],
     dedup_mode: str,
-) -> DatasetExportPaths:
-    run_configured_step07_export(
+) -> dict[str, Any]:
+    return run_configured_step07_export(
         DatasetExportRequest(
             pairs=pairs,
             paired_signatures_dir=paired_signatures_dir,
@@ -295,35 +194,43 @@ def export_dataset(
             dataset_basename=DATASET_BASENAME,
         )
     )
-    return dataset_paths
 
 
-def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDatasetExportResult:
-    paths = build_stage07b_paths(params.run_dir)
-    selected = build_train_patched_counterparts(run_dir=params.run_dir)
+def _merge_patched_summary(summary_path: Path, selection_stats: dict[str, Any]) -> dict[str, Any]:
+    payload = load_json(summary_path)
+    stats = dict(payload.get('stats') or {})
+    stats['selection'] = selection_stats
+    payload['stats'] = stats
+    write_json(summary_path, payload)
+    return payload
+
+
+def export_patched_dataset(*, run_dir: Path, dedup_mode: str) -> dict[str, Any]:
+    paths = build_stage07b_paths(run_dir)
+    selected = build_train_patched_counterparts(run_dir=run_dir)
 
     generate_slices(
-        signature_db_dir=selected.pairing.signatures_dir,
-        output_dir=paths.slices.output_dir,
+        signature_db_dir=Path(selected['artifacts']['signatures_dir']),
+        output_dir=paths['slices']['output_dir'],
         overwrite=False,
-        run_dir=paths.run_dir,
-        dataset_basename=DATASET_BASENAME,
     )
 
-    dataset_paths = export_dataset(
-        pairs=selected.pairs,
-        paired_signatures_dir=selected.pairing.signatures_dir,
-        slice_dir=paths.slices.slice_dir,
-        dataset_paths=paths.dataset,
-        dedup_mode=params.dedup_mode,
+    export_dataset(
+        pairs=selected['pairs'],
+        paired_signatures_dir=Path(selected['artifacts']['signatures_dir']),
+        slice_dir=paths['slices']['slice_dir'],
+        dataset_paths=paths['dataset'],
+        dedup_mode=dedup_mode,
     )
+    merged_summary = _merge_patched_summary(paths['dataset']['summary_json'], selected['stats'])
 
-    return PatchedDatasetExportResult(
-        dataset_basename=DATASET_BASENAME,
-        run_dir=paths.run_dir,
-        pair_dir=paths.pair_dir,
-        pairing=selected.pairing,
-        slices=paths.slices,
-        dataset=dataset_paths,
-        dedup_mode=params.dedup_mode,
-    )
+    artifacts = {
+        'pairing_pairs_jsonl': str(paths['pairing']['pairs_jsonl']),
+        'pairing_signatures_dir': str(paths['pairing']['signatures_dir']),
+        'slice_dir': str(paths['slices']['slice_dir']),
+        'csv_path': str(paths['dataset']['csv_path']),
+        'normalized_slices_dir': str(paths['dataset']['normalized_slices_dir']),
+        'split_manifest_json': str(paths['dataset']['split_manifest_json']),
+        'summary_json': str(paths['dataset']['summary_json']),
+    }
+    return {'artifacts': artifacts, 'stats': merged_summary['stats']}

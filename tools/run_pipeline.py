@@ -6,15 +6,11 @@ import datetime
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from shared import dataset_dedup as _dataset_dedup
 from shared.artifact_layout import (
     TRAIN_PATCHED_COUNTERPARTS_BASENAME,
-    DatasetExportPaths,
-    PairTracePaths,
-    PatchedPairingPaths,
-    SliceStagePaths,
     build_dataset_export_paths,
     build_pair_trace_paths,
     build_patched_pairing_paths,
@@ -31,12 +27,10 @@ from stage import stage06_slices as _stage06_slices
 from stage import stage07_dataset_export as _stage07_dataset_export
 from stage import stage07b_patched_export as _stage07b_patched_export
 
-PrimaryDatasetExportParams = _stage07_dataset_export.PrimaryDatasetExportParams
 compute_pair_split = _stage07_dataset_export.compute_pair_split
-dedupe_pairs_by_normalized_rows = _dataset_dedup.dedupe_pairs_by_normalized_rows
 export_dataset_from_pipeline = _stage07_dataset_export.export_dataset_from_pipeline
 export_primary_dataset = _stage07_dataset_export.export_primary_dataset
-PatchedDatasetExportParams = _stage07b_patched_export.PatchedDatasetExportParams
+dedupe_pairs_by_normalized_rows = _dataset_dedup.dedupe_pairs_by_normalized_rows
 export_patched_dataset = _stage07b_patched_export.export_patched_dataset
 
 
@@ -53,31 +47,6 @@ class FullRunConfig:
     pair_split_seed: int
     pair_train_ratio: float
     dedup_mode: str
-
-
-@dataclass(frozen=True)
-class FullRunPaths:
-    run_dir: Path
-    manifest_dir: Path
-    taint_dir: Path
-    flow_dir: Path
-    infer_results_root: Path
-    signatures_root: Path
-    trace_dir: Path
-    logs_dir: Path
-    manifest_with_comments_xml: Path
-    generated_taint_config: Path
-    infer_summary_json: Path
-    trace_strict_jsonl: Path
-    run_summary_path: Path
-    source_testcases_root: Path
-    stage02b: _stage02b_flow.Stage02BOutputPaths
-    pair: PairTracePaths
-    slices: SliceStagePaths
-    dataset: DatasetExportPaths
-    patched_pair: PatchedPairingPaths
-    patched_slices: SliceStagePaths
-    patched_dataset: DatasetExportPaths
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,70 +93,47 @@ def now_ts() -> str:
     return datetime.datetime.now().strftime('%Y.%m.%d-%H:%M:%S')
 
 
-def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> FullRunPaths:
+def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, object]:
     run_dir = run_dir.resolve()
     source_root = source_root.resolve()
 
     manifest_dir = run_dir / '01_manifest'
     taint_dir = run_dir / '02a_taint'
     flow_dir = run_dir / '02b_flow'
-    infer_results_root = run_dir / '03_infer-results'
-    signatures_root = run_dir / '03_signatures'
     trace_dir = run_dir / '04_trace_flow'
-    logs_dir = run_dir / 'logs'
     pair_paths = build_pair_trace_paths(run_dir / '05_pair_trace_ds')
     slice_paths = build_slice_stage_paths(run_dir / '06_slices')
     dataset_paths = build_dataset_export_paths(run_dir / '07_dataset_export')
-    patched_pair_paths = build_patched_pairing_paths(
-        pair_paths.output_dir,
-        TRAIN_PATCHED_COUNTERPARTS_BASENAME,
-    )
-    patched_slice_paths = build_slice_stage_paths(
-        slice_paths.output_dir / TRAIN_PATCHED_COUNTERPARTS_BASENAME
-    )
-    patched_dataset_paths = build_dataset_export_paths(
-        dataset_paths.output_dir,
-        TRAIN_PATCHED_COUNTERPARTS_BASENAME,
-    )
-    stage02b_output_paths = _stage02b_flow.build_stage02b_output_paths(flow_dir)
 
-    return FullRunPaths(
-        run_dir=run_dir,
-        manifest_dir=manifest_dir,
-        taint_dir=taint_dir,
-        flow_dir=flow_dir,
-        infer_results_root=infer_results_root,
-        signatures_root=signatures_root,
-        trace_dir=trace_dir,
-        logs_dir=logs_dir,
-        manifest_with_comments_xml=manifest_dir / 'manifest_with_comments.xml',
-        generated_taint_config=taint_dir / 'pulse-taint-config.json',
-        infer_summary_json=run_dir / '03_infer_summary.json',
-        trace_strict_jsonl=trace_dir / 'trace_flow_match_strict.jsonl',
-        run_summary_path=run_dir / 'run_summary.json',
-        source_testcases_root=source_root / 'testcases',
-        stage02b=stage02b_output_paths,
-        pair=pair_paths,
-        slices=slice_paths,
-        dataset=dataset_paths,
-        patched_pair=patched_pair_paths,
-        patched_slices=patched_slice_paths,
-        patched_dataset=patched_dataset_paths,
-    )
-
-
-def run_internal_step(
-    step_key: str,
-    logs_dir: Path,
-    fn: Callable[[], dict[str, object]],
-) -> dict[str, object]:
-    del step_key, logs_dir
-    payload = fn()
-    if hasattr(payload, 'to_payload'):
-        payload = payload.to_payload()
-    if isinstance(payload, dict):
-        return payload
-    return {}
+    return {
+        'run_dir': run_dir,
+        'manifest_dir': manifest_dir,
+        'taint_dir': taint_dir,
+        'flow_dir': flow_dir,
+        'infer_results_root': run_dir / '03_infer-results',
+        'signatures_root': run_dir / '03_signatures',
+        'infer_summary_json': run_dir / '03_infer_summary.json',
+        'trace_dir': trace_dir,
+        'manifest_with_comments_xml': manifest_dir / 'manifest_with_comments.xml',
+        'generated_taint_config': taint_dir / 'pulse-taint-config.json',
+        'trace_strict_jsonl': trace_dir / 'trace_flow_match_strict.jsonl',
+        'source_testcases_root': source_root / 'testcases',
+        'stage02b': _stage02b_flow.build_stage02b_output_paths(flow_dir),
+        'pair': pair_paths,
+        'slices': slice_paths,
+        'dataset': dataset_paths,
+        'patched_pair': build_patched_pairing_paths(
+            pair_paths['output_dir'],
+            TRAIN_PATCHED_COUNTERPARTS_BASENAME,
+        ),
+        'patched_slices': build_slice_stage_paths(
+            slice_paths['output_dir'] / TRAIN_PATCHED_COUNTERPARTS_BASENAME
+        ),
+        'patched_dataset': build_dataset_export_paths(
+            dataset_paths['output_dir'],
+            TRAIN_PATCHED_COUNTERPARTS_BASENAME,
+        ),
+    }
 
 
 def _validate_full_inputs(config: FullRunConfig) -> None:
@@ -221,42 +167,9 @@ def _normalize_full_run_config(config: FullRunConfig) -> FullRunConfig:
     )
 
 
-def _require_exists(path: Path, error_message: str) -> None:
+def _require_exists(path: Path, label: str) -> None:
     if not path.exists():
-        raise RuntimeError(error_message)
-
-
-def _require_all(required_outputs: list[tuple[Path, str]]) -> None:
-    for output_path, error_message in required_outputs:
-        _require_exists(output_path, error_message)
-
-
-def _run_checked_internal_step(
-    *,
-    step_key: str,
-    logs_dir: Path,
-    fn: Callable[[], dict[str, object]],
-    required_outputs: list[tuple[Path, str]],
-) -> dict[str, object]:
-    result = run_internal_step(step_key, logs_dir=logs_dir, fn=fn)
-    _require_all(required_outputs)
-    return result
-
-
-def _run_checked_stage_call(
-    *,
-    step_key: str,
-    paths: FullRunPaths,
-    runner: Callable[..., dict[str, object]],
-    required_outputs: list[tuple[Path, str]],
-    **runner_kwargs: object,
-) -> dict[str, object]:
-    return _run_checked_internal_step(
-        step_key=step_key,
-        logs_dir=paths.logs_dir,
-        fn=lambda: runner(**runner_kwargs),
-        required_outputs=required_outputs,
-    )
+        raise RuntimeError(f'Expected {label} not found: {path}')
 
 
 def _select_taint_config(
@@ -271,212 +184,150 @@ def _select_taint_config(
 
 def run_step01_manifest_comment_scan(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     manifest: Path,
     source_root: Path,
 ) -> dict[str, object]:
-    output_xml = paths.manifest_with_comments_xml
-    return _run_checked_stage_call(
-        step_key='01_manifest_comment_scan',
-        paths=paths,
-        runner=_stage01_manifest.scan_manifest_comments,
+    output_xml = paths['manifest_with_comments_xml']
+    result = _stage01_manifest.scan_manifest_comments(
         manifest=manifest,
         source_root=source_root,
         output_xml=output_xml,
-        required_outputs=[
-            (output_xml, f'Expected manifest_with_comments_xml not found: {output_xml}')
-        ],
     )
+    _require_exists(output_xml, 'manifest_with_comments_xml')
+    return result
 
 
 def run_step02a_code_field_inventory(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     source_root: Path,
 ) -> dict[str, object]:
-    return _run_checked_stage_call(
-        step_key='02a_code_field_inventory',
-        paths=paths,
-        runner=_stage02a_taint.extract_unique_code_fields,
-        input_xml=paths.manifest_with_comments_xml,
+    result = _stage02a_taint.extract_unique_code_fields(
+        input_xml=paths['manifest_with_comments_xml'],
         source_root=source_root,
-        output_dir=paths.taint_dir,
-        pulse_taint_config_output=paths.generated_taint_config,
-        minimal_outputs=True,
-        required_outputs=[
-            (
-                paths.generated_taint_config,
-                f'Expected generated_taint_config not found: {paths.generated_taint_config}',
-            )
-        ],
+        output_dir=paths['taint_dir'],
+        pulse_taint_config_output=paths['generated_taint_config'],
     )
+    _require_exists(paths['generated_taint_config'], 'generated_taint_config')
+    return result
 
 
-def run_step02b_flow_build(*, paths: FullRunPaths) -> dict[str, object]:
-    result = run_internal_step(
-        '02b_testcase_flow_build',
-        logs_dir=paths.logs_dir,
-        fn=lambda: _stage02b_flow.run_stage02b_flow(
-            input_xml=paths.manifest_with_comments_xml,
-            source_root=paths.source_testcases_root,
-            output_dir=paths.flow_dir,
-            minimal_outputs=True,
-        ),
+def run_step02b_flow_build(*, paths: dict[str, object]) -> dict[str, object]:
+    result = _stage02b_flow.run_stage02b_flow(
+        input_xml=paths['manifest_with_comments_xml'],
+        source_root=paths['source_testcases_root'],
+        output_dir=paths['flow_dir'],
     )
-    _require_all(
-        [
-            (
-                paths.stage02b.manifest_with_testcase_flows_xml,
-                'Expected manifest_with_testcase_flows_xml not found: '
-                f'{paths.stage02b.manifest_with_testcase_flows_xml}',
-            )
-        ]
-    )
+    _require_exists(paths['stage02b']['manifest_with_testcase_flows_xml'], 'manifest_with_testcase_flows_xml')
+    _require_exists(paths['stage02b']['summary_json'], '02b summary_json')
     return result
 
 
 def run_step03_infer_and_signature(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     selected_taint_config: Path,
     files: list[str],
     all_cwes: bool,
     cwes: Optional[list[int]],
-) -> tuple[dict[str, object], dict[str, object], Path]:
-    result = run_internal_step(
-        '03_infer_and_signature',
-        logs_dir=paths.logs_dir,
-        fn=lambda: _stage03_infer.run_infer_and_signature(
-            cwes=cwes,
-            global_result=False,
-            all_cwes=all_cwes,
-            files=files,
-            pulse_taint_config=selected_taint_config,
-            infer_results_root=paths.infer_results_root,
-            signatures_root=paths.signatures_root,
-            summary_json=None,
-            minimal_outputs=True,
-        ),
+) -> dict[str, object]:
+    result = _stage03_infer.run_infer_and_signature(
+        cwes=cwes,
+        global_result=False,
+        all_cwes=all_cwes,
+        files=files,
+        pulse_taint_config=selected_taint_config,
+        infer_results_root=paths['infer_results_root'],
+        signatures_root=paths['signatures_root'],
+        summary_json=paths['infer_summary_json'],
     )
-
-    signature_non_empty_raw = result.get('signature_non_empty_dir')
-    if signature_non_empty_raw:
-        signature_non_empty_dir = Path(signature_non_empty_raw)
-    else:
-        signature_output_dir = result.get('signature_output_dir')
-        if not signature_output_dir:
-            raise RuntimeError('signature_output_dir not found in infer result')
-        signature_non_empty_dir = Path(signature_output_dir) / 'non_empty'
-
-    _require_all(
-        [
-            (
-                signature_non_empty_dir,
-                f'Signature non_empty directory not found: {signature_non_empty_dir}',
-            )
-        ]
-    )
-
-    return result, result, signature_non_empty_dir
+    _require_exists(Path(result['artifacts']['signature_non_empty_dir']), 'signature_non_empty_dir')
+    _require_exists(paths['infer_summary_json'], '03_infer_summary.json')
+    return result
 
 
 def run_step04_trace_flow(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     signature_non_empty_dir: Path,
 ) -> dict[str, object]:
-    return _run_checked_stage_call(
-        step_key='04_trace_flow_filter',
-        paths=paths,
-        runner=_stage04_trace_flow.filter_traces_by_flow,
-        flow_xml=paths.stage02b.manifest_with_testcase_flows_xml,
+    result = _stage04_trace_flow.filter_traces_by_flow(
+        flow_xml=paths['stage02b']['manifest_with_testcase_flows_xml'],
         signatures_dir=signature_non_empty_dir,
-        output_dir=paths.trace_dir,
-        minimal_outputs=True,
-        required_outputs=[
-            (
-                paths.trace_strict_jsonl,
-                f'Expected trace_flow_match_strict_jsonl not found: {paths.trace_strict_jsonl}',
-            )
-        ],
+        output_dir=paths['trace_dir'],
     )
+    _require_exists(paths['trace_strict_jsonl'], 'trace_flow_match_strict.jsonl')
+    return result
 
 
-def run_step05_pair_trace(*, paths: FullRunPaths) -> dict[str, object]:
-    return _run_checked_stage_call(
-        step_key='05_pair_trace_dataset',
-        paths=paths,
-        runner=_stage05_pair_trace.build_paired_trace_dataset,
-        trace_jsonl=paths.trace_strict_jsonl,
-        output_dir=paths.pair.output_dir,
+def run_step05_pair_trace(*, paths: dict[str, object]) -> dict[str, object]:
+    result = _stage05_pair_trace.build_paired_trace_dataset(
+        trace_jsonl=paths['trace_strict_jsonl'],
+        output_dir=paths['pair']['output_dir'],
         overwrite=False,
-        run_dir=paths.run_dir,
-        minimal_outputs=True,
-        required_outputs=paths.pair.required_outputs(),
+        run_dir=paths['run_dir'],
     )
+    for key in ('pairs_jsonl', 'leftover_counterparts_jsonl', 'paired_signatures_dir', 'summary_json'):
+        _require_exists(paths['pair'][key], f'05_pair_trace_ds/{key}')
+    return result
 
 
-def run_step06_slices(*, paths: FullRunPaths) -> dict[str, object]:
-    return _run_checked_stage_call(
-        step_key='06_generate_slices',
-        paths=paths,
-        runner=_stage06_slices.generate_slices,
-        signature_db_dir=paths.pair.paired_signatures_dir,
-        output_dir=paths.slices.output_dir,
+def run_step06_slices(*, paths: dict[str, object]) -> dict[str, object]:
+    result = _stage06_slices.generate_slices(
+        signature_db_dir=paths['pair']['paired_signatures_dir'],
+        output_dir=paths['slices']['output_dir'],
         overwrite=False,
-        run_dir=paths.run_dir,
-        minimal_outputs=True,
-        required_outputs=paths.slices.required_outputs(),
     )
+    for key in ('slice_dir', 'summary_json'):
+        _require_exists(paths['slices'][key], f'06_slices/{key}')
+    return result
 
 
 def run_step07_dataset_export(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     pair_split_seed: int,
     pair_train_ratio: float,
     dedup_mode: str,
 ) -> dict[str, object]:
-    return _run_checked_stage_call(
-        step_key='07_dataset_export',
-        paths=paths,
-        runner=export_primary_dataset,
-        params=PrimaryDatasetExportParams(
-            pairs_jsonl=paths.pair.pairs_jsonl,
-            paired_signatures_dir=paths.pair.paired_signatures_dir,
-            slice_dir=paths.slices.slice_dir,
-            output_dir=paths.dataset.output_dir,
-            split_seed=pair_split_seed,
-            train_ratio=pair_train_ratio,
-            dedup_mode=dedup_mode,
-            minimal_outputs=True,
-        ),
-        required_outputs=paths.dataset.required_outputs(),
+    result = export_primary_dataset(
+        pairs_jsonl=paths['pair']['pairs_jsonl'],
+        paired_signatures_dir=paths['pair']['paired_signatures_dir'],
+        slice_dir=paths['slices']['slice_dir'],
+        output_dir=paths['dataset']['output_dir'],
+        split_seed=pair_split_seed,
+        train_ratio=pair_train_ratio,
+        dedup_mode=dedup_mode,
     )
+    for key in ('csv_path', 'normalized_slices_dir', 'split_manifest_json', 'summary_json'):
+        _require_exists(paths['dataset'][key], f'07_dataset_export/{key}')
+    return result
 
 
 def run_step07b_train_patched_counterparts(
     *,
-    paths: FullRunPaths,
+    paths: dict[str, object],
     dedup_mode: str,
 ) -> dict[str, object]:
-    required_outputs = (
-        paths.patched_pair.required_outputs(prefix='pairing_')
-        + paths.patched_slices.required_outputs(prefix='slices_')
-        + paths.patched_dataset.required_outputs(prefix='dataset_')
+    result = export_patched_dataset(
+        run_dir=paths['run_dir'],
+        dedup_mode=dedup_mode,
     )
-    return _run_checked_stage_call(
-        step_key='07b_train_patched_counterparts_export',
-        paths=paths,
-        runner=export_patched_dataset,
-        params=PatchedDatasetExportParams(run_dir=paths.run_dir, dedup_mode=dedup_mode),
-        required_outputs=required_outputs,
-    )
+    for path in (
+        paths['patched_pair']['pairs_jsonl'],
+        paths['patched_pair']['signatures_dir'],
+        paths['patched_slices']['slice_dir'],
+        paths['patched_dataset']['csv_path'],
+        paths['patched_dataset']['normalized_slices_dir'],
+        paths['patched_dataset']['split_manifest_json'],
+        paths['patched_dataset']['summary_json'],
+    ):
+        _require_exists(path, path.name)
+    return result
 
 
-def run_full_pipeline(
-    config: FullRunConfig,
-) -> int:
+def run_full_pipeline(config: FullRunConfig) -> int:
     _validate_full_inputs(config)
     config = _normalize_full_run_config(config)
 
@@ -498,10 +349,10 @@ def run_full_pipeline(
         run_step02b_flow_build(paths=paths)
 
         selected_taint_config, _ = _select_taint_config(
-            generated_taint_config=paths.generated_taint_config,
+            generated_taint_config=paths['generated_taint_config'],
             committed_taint_config=config.committed_taint_config,
         )
-        _, _, signature_non_empty_dir = run_step03_infer_and_signature(
+        stage03 = run_step03_infer_and_signature(
             paths=paths,
             selected_taint_config=selected_taint_config,
             files=config.files,
@@ -510,7 +361,7 @@ def run_full_pipeline(
         )
         run_step04_trace_flow(
             paths=paths,
-            signature_non_empty_dir=signature_non_empty_dir,
+            signature_non_empty_dir=Path(stage03['artifacts']['signature_non_empty_dir']),
         )
         run_step05_pair_trace(paths=paths)
         run_step06_slices(paths=paths)
@@ -518,6 +369,10 @@ def run_full_pipeline(
             paths=paths,
             pair_split_seed=config.pair_split_seed,
             pair_train_ratio=config.pair_train_ratio,
+            dedup_mode=config.dedup_mode,
+        )
+        run_step07b_train_patched_counterparts(
+            paths=paths,
             dedup_mode=config.dedup_mode,
         )
     except Exception as exc:

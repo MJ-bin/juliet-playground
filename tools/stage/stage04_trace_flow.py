@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.jsonio import write_jsonl, write_summary_json
+from shared.jsonio import write_jsonl, write_stage_summary
 from shared.juliet_keys import derive_testcase_key_from_file_name
 
 TARGET_TAGS = {'flaw', 'comment_flaw', 'comment_fix'}
@@ -128,7 +128,7 @@ def choose_best_flow(flow_match: dict[str, dict]) -> tuple[str | None, dict | No
 
 
 def filter_traces_by_flow(
-    *, flow_xml: Path, signatures_dir: Path, output_dir: Path, minimal_outputs: bool = False
+    *, flow_xml: Path, signatures_dir: Path, output_dir: Path
 ) -> dict[str, object]:
     if not flow_xml.exists():
         raise FileNotFoundError(f'Flow XML not found: {flow_xml}')
@@ -137,9 +137,7 @@ def filter_traces_by_flow(
 
     flow_index, flow_index_stats = load_flow_index(flow_xml)
 
-    all_records: list[dict] = []
     strict_records: list[dict] = []
-    partial_records: list[dict] = []
 
     stats = Counter()
     matched_flow_counter = Counter()
@@ -154,13 +152,6 @@ def filter_traces_by_flow(
             for trace_file in sorted(dir_path.glob('*.json')):
                 stats['traces_total'] += 1
                 stats['traces_without_flow_index'] += 1
-                all_records.append(
-                    {
-                        'trace_file': str(trace_file),
-                        'testcase_key': testcase_key,
-                        'status': 'no_flow_index',
-                    }
-                )
             continue
 
         for trace_file in sorted(dir_path.glob('*.json')):
@@ -194,48 +185,19 @@ def filter_traces_by_flow(
                 'best_flow_meta': best_meta,
                 'flow_match': flow_match,
             }
-            all_records.append(rec)
             if status == 'strict_match':
                 strict_records.append(rec)
-            if status in {'strict_match', 'partial_match'}:
-                partial_records.append(rec)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    all_path = output_dir / 'trace_flow_match_all.jsonl'
     strict_path = output_dir / 'trace_flow_match_strict.jsonl'
-    matched_path = output_dir / 'trace_flow_match_partial_or_strict.jsonl'
     summary_path = output_dir / 'summary.json'
 
     write_jsonl(strict_path, strict_records)
-    if not minimal_outputs:
-        write_jsonl(all_path, all_records)
-        write_jsonl(matched_path, partial_records)
-
-    summary = {
-        'flow_xml': str(flow_xml),
-        'signatures_dir': str(signatures_dir),
-        'output_dir': str(output_dir),
+    artifacts = {'trace_flow_match_strict_jsonl': str(strict_path)}
+    stats_payload = {
+        'traces_total': int(stats['traces_total']),
+        'traces_strict_match': int(stats['traces_strict_match']),
         'matched_best_flow_counts': dict(matched_flow_counter),
     }
-    if not minimal_outputs:
-        summary.update(
-            {
-                'flow_index': flow_index_stats,
-                'trace_stats': dict(stats),
-                'output_files': {
-                    'all': str(all_path),
-                    'strict': str(strict_path),
-                    'partial_or_strict': str(matched_path),
-                },
-            }
-        )
-        write_summary_json(summary_path, summary)
-    else:
-        summary.update(
-            {
-                'trace_flow_match_strict_jsonl': str(strict_path),
-                'traces_total': int(stats['traces_total']),
-                'traces_strict_match': int(stats['traces_strict_match']),
-            }
-        )
-    return summary
+    write_stage_summary(summary_path, artifacts=artifacts, stats=stats_payload)
+    return {'artifacts': artifacts, 'stats': stats_payload}

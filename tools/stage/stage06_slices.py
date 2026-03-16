@@ -18,8 +18,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from shared.artifact_layout import build_slice_stage_paths, path_strings
 from shared.fs import prepare_output_dir
-from shared.jsonio import write_summary_json
+from shared.jsonio import write_stage_summary
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 from shared.traces import extract_std_bug_trace
@@ -154,24 +155,20 @@ def process_signature_db(
 ) -> dict[str, Any]:
     slice_dir.mkdir(parents=True, exist_ok=True)
 
-    testcase_dirs = sorted(d for d in signature_db_dir.iterdir() if d.is_dir())
-
+    testcase_dirs = sorted(directory for directory in signature_db_dir.iterdir() if directory.is_dir())
     total_slices = 0
-    errors = 0
     counters = Counter()
-    suffix_counter = Counter()
 
     for testcase_dir in testcase_dirs:
         counters['testcase_dirs_total'] += 1
         json_files = sorted(
-            p for p in testcase_dir.iterdir() if p.is_file() and p.suffix == '.json'
+            path for path in testcase_dir.iterdir() if path.is_file() and path.suffix == '.json'
         )
         for json_path in json_files:
             counters['json_files_total'] += 1
             try:
                 data = json.loads(json_path.read_text(encoding='utf-8'))
-                bug_trace = data.get('bug_trace', [])
-                std_bug_trace = extract_std_bug_trace(bug_trace)
+                std_bug_trace = extract_std_bug_trace(data.get('bug_trace', []))
                 if not std_bug_trace:
                     counters['skipped_empty_bug_trace'] += 1
                     continue
@@ -182,23 +179,21 @@ def process_signature_db(
                     continue
 
                 suffix = guess_output_suffix(data, std_bug_trace)
-                suffix_counter[suffix] += 1
                 output_filename = f'slice_{testcase_dir.name}_{json_path.stem}{suffix}'
-                output_path = slice_dir / output_filename
-                output_path.write_text(slice_content, encoding='utf-8')
+                (slice_dir / output_filename).write_text(slice_content, encoding='utf-8')
                 total_slices += 1
                 counters['generated'] += 1
             except Exception as exc:
                 print(f'[ERROR] {json_path}: {exc}')
-                errors += 1
                 counters['errors'] += 1
 
+    skipped = sum(value for key, value in counters.items() if key.startswith('skipped_'))
     return {
-        'signature_db_dirs_total': len(testcase_dirs),
         'total_slices': total_slices,
-        'errors': errors,
+        'generated': int(counters['generated']),
+        'skipped': skipped,
+        'errors': int(counters['errors']),
         'counts': dict(counters),
-        'slice_extension_counts': dict(suffix_counter),
     }
 
 
@@ -211,31 +206,18 @@ def generate_slices(
     overwrite: bool = False,
     run_dir: Path | None = None,
     dataset_basename: str | None = None,
-    minimal_outputs: bool = False,
 ) -> dict[str, Any]:
+    del run_dir, dataset_basename
     validate_args(signature_db_dir, old_prefix=old_prefix, new_prefix=new_prefix)
     prepare_output_dir(output_dir, overwrite)
-    slice_dir = output_dir / 'slice'
 
-    summary = process_signature_db(
+    paths = build_slice_stage_paths(output_dir)
+    stats = process_signature_db(
         signature_db_dir=signature_db_dir,
-        slice_dir=slice_dir,
+        slice_dir=paths['slice_dir'],
         old_prefix=old_prefix,
         new_prefix=new_prefix,
     )
-
-    summary_payload = {
-        'signature_db_dir': str(signature_db_dir),
-        'output_dir': str(output_dir),
-        'slice_dir': str(slice_dir),
-        'run_dir': str(run_dir) if run_dir else None,
-        'old_prefix': old_prefix,
-        'new_prefix': new_prefix,
-        **summary,
-    }
-    if dataset_basename is not None:
-        summary_payload['dataset_basename'] = dataset_basename
-    summary_path = output_dir / 'summary.json'
-    if not minimal_outputs:
-        write_summary_json(summary_path, summary_payload)
-    return summary_payload
+    artifacts = path_strings(paths)
+    write_stage_summary(paths['summary_json'], artifacts=artifacts, stats=stats)
+    return {'artifacts': artifacts, 'stats': stats}

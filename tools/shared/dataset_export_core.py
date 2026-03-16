@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from shared.artifact_layout import DatasetExportPaths
+from shared.artifact_layout import path_strings
 from shared.csvio import write_csv_rows
 from shared.dataset_dedup import ROLE_SORT_ORDER, dedupe_pairs_by_normalized_rows
 from shared.dataset_normalize import normalize_slice_function_names
@@ -15,7 +15,7 @@ from shared.dataset_sources import (
     load_tree_sitter_parsers,
     normalize_artifact_path,
 )
-from shared.jsonio import write_json, write_summary_json
+from shared.jsonio import write_json, write_stage_summary
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class DatasetExportRequest:
     pairs: list[dict[str, Any]]
     paired_signatures_dir: Path
     slice_dir: Path
-    export_paths: DatasetExportPaths
+    export_paths: dict[str, Path]
     dedup_mode: str
     split_assignments_fn: Callable[[list[str]], dict[str, str]]
     collect_defined_function_names_fn: Callable[
@@ -31,9 +31,6 @@ class DatasetExportRequest:
     ]
     build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]]
     dataset_basename: str | None = None
-    prepare_target_fn: Callable[[Path, bool], None] | None = None
-    overwrite: bool = False
-    minimal_outputs: bool = False
 
 
 @dataclass
@@ -55,9 +52,9 @@ class ExportAccumulator:
     counts: Counter[str] = field(default_factory=Counter)
 
 
-def _prepare_export_outputs(*, export_paths: DatasetExportPaths) -> None:
-    export_paths.csv_path.parent.mkdir(parents=True, exist_ok=True)
-    export_paths.normalized_slices_dir.mkdir(parents=True, exist_ok=True)
+def _prepare_export_outputs(*, export_paths: dict[str, Path]) -> None:
+    export_paths['output_dir'].mkdir(parents=True, exist_ok=True)
+    export_paths['normalized_slices_dir'].mkdir(parents=True, exist_ok=True)
 
 
 def run_configured_step07_export(request: DatasetExportRequest) -> dict[str, Any]:
@@ -68,45 +65,26 @@ def run_configured_step07_export(request: DatasetExportRequest) -> dict[str, Any
     if request.dedup_mode not in {'none', 'row'}:
         raise ValueError(f'Unsupported dedup_mode: {request.dedup_mode}')
 
-    request.export_paths.output_dir.mkdir(parents=True, exist_ok=True)
-    if request.prepare_target_fn is not None:
-        targets = [
-            request.export_paths.csv_path,
-            request.export_paths.normalized_slices_dir,
-            request.export_paths.split_manifest_json,
-        ]
-        if not request.minimal_outputs:
-            targets.extend(
-                [
-                    request.export_paths.dedup_dropped_csv,
-                    request.export_paths.token_counts_csv,
-                    request.export_paths.token_distribution_png,
-                    request.export_paths.summary_json,
-                ]
-            )
-        for target in targets:
-            request.prepare_target_fn(target, request.overwrite)
-
     return run_step07_export_core(request)
 
 
 def _build_role_specs(pair: dict[str, Any]) -> list[dict[str, Any]]:
-    output_files = pair.get('output_files') or {}
     counterpart_flow_type = str(pair.get('counterpart_flow_type') or '')
+    output_files = pair.get('output_files') or {}
     return [
         {
             'role': 'b2b',
             'role_name': 'b2b',
             'target': 1,
-            'signature_info': pair.get('b2b_signature') or {},
-            'signature_path_raw': str(output_files.get('b2b') or ''),
+            'signature_path': str(pair.get('b2b_path') or output_files.get('b2b') or ''),
         },
         {
             'role': 'counterpart',
             'role_name': counterpart_flow_type,
             'target': 0,
-            'signature_info': pair.get('counterpart_signature') or {},
-            'signature_path_raw': str(output_files.get(counterpart_flow_type) or ''),
+            'signature_path': str(
+                pair.get('counterpart_path') or output_files.get(counterpart_flow_type) or ''
+            ),
         },
     ]
 
@@ -154,7 +132,7 @@ def _build_pair_role_record(
     if not role_name:
         return None, 'missing_role_name'
 
-    signature_path_raw = str(role['signature_path_raw'])
+    signature_path_raw = str(role['signature_path'])
     if not signature_path_raw:
         return None, 'missing_signature_path'
 
@@ -167,10 +145,8 @@ def _build_pair_role_record(
         return None, 'missing_slice_file'
 
     signature_payload = _load_signature_payload(signature_path)
-    primary_file_hint = role['signature_info'].get('primary_file')
-    source_candidates = request.build_source_file_candidates_fn(
-        signature_payload, primary_file_hint
-    )
+    primary_file_hint = str(signature_payload.get('file') or '') or None
+    source_candidates = request.build_source_file_candidates_fn(signature_payload, primary_file_hint)
     user_defined_function_names = _collect_user_defined_function_names(
         source_candidates=source_candidates,
         request=request,
@@ -250,33 +226,6 @@ def _collect_surviving_pairs(
     return accumulator
 
 
-def _write_token_counts_csv(token_count_rows: list[dict[str, Any]], token_counts_csv: Path) -> None:
-    write_csv_rows(
-        token_counts_csv,
-        [
-            'pair_id',
-            'filename',
-            'extension',
-            'role',
-            'code_token_count',
-            'input_token_count_with_special',
-            'exceeds_510',
-        ],
-        (
-            [
-                row['pair_id'],
-                row['slice_filename'],
-                row['extension'],
-                row['role'],
-                row['code_token_count'],
-                row['input_token_count_with_special'],
-                row['exceeds_510'],
-            ]
-            for row in token_count_rows
-        ),
-    )
-
-
 def _build_ordered_rows(
     surviving_pairs: dict[str, list[dict[str, Any]]],
     split_assignments: dict[str, str],
@@ -316,8 +265,7 @@ def _write_dataset_csv_and_slices(
     ordered_rows: list[dict[str, Any]],
     csv_path: Path,
     normalized_slices_dir: Path,
-) -> dict[tuple[str, str], int]:
-    kept_unique_id_by_pair_role: dict[tuple[str, str], int] = {}
+) -> None:
     rows: list[list[Any]] = []
     for idx, row in enumerate(ordered_rows, start=1):
         output_filename = f'{idx}{row["extension"]}'
@@ -325,7 +273,6 @@ def _write_dataset_csv_and_slices(
             row['normalized_code'], encoding='utf-8'
         )
         vulnerable_line_numbers = 1 if int(row['target']) == 1 else ''
-        kept_unique_id_by_pair_role[(str(row['pair_id']), str(row['role']))] = idx
         rows.append(
             [
                 idx,
@@ -355,104 +302,18 @@ def _write_dataset_csv_and_slices(
         rows,
     )
 
-    return kept_unique_id_by_pair_role
-
-
-def _write_dedup_audit_csv(dedup_audit_rows: list[dict[str, Any]], dedup_dropped_csv: Path) -> None:
-    write_csv_rows(
-        dedup_dropped_csv,
-        [
-            'dropped_row_id',
-            'pair_id',
-            'testcase_key',
-            'role',
-            'role_name',
-            'target',
-            'project',
-            'source_signature_path',
-            'normalized_code_hash',
-            'dedup_reason',
-            'dedup_trigger_hashes',
-            'matched_kept_pair_id',
-            'matched_kept_role',
-            'matched_kept_source_signature_path',
-            'matched_kept_unique_id',
-            'processed_func',
-        ],
-        (
-            [
-                dropped_row_id,
-                row['pair_id'],
-                row['testcase_key'],
-                row['role'],
-                row['role_name'],
-                row['target'],
-                row['project'],
-                row['source_signature_path'],
-                row['normalized_code_hash'],
-                row['dedup_reason'],
-                row['dedup_trigger_hashes'],
-                row['matched_kept_pair_id'],
-                row['matched_kept_role'],
-                row['matched_kept_source_signature_path'],
-                row['matched_kept_unique_id'],
-                row['processed_func'],
-            ]
-            for dropped_row_id, row in enumerate(dedup_audit_rows, start=1)
-        ),
-    )
-
 
 def _apply_dedup(
     accumulator: ExportAccumulator,
     *,
     dedup_mode: str,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[dict[str, Any]]]:
-    return dedupe_pairs_by_normalized_rows(
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    surviving_pairs, dedup_summary, _dedup_audit_rows = dedupe_pairs_by_normalized_rows(
         surviving_pairs=accumulator.surviving_pairs,
         filtered_pair_reasons=accumulator.filtered_pair_reasons,
         dedup_mode=dedup_mode,
     )
-
-
-def _write_export_artifacts(
-    *,
-    request: DatasetExportRequest,
-    surviving_pairs: dict[str, list[dict[str, Any]]],
-    dedup_audit_rows: list[dict[str, Any]],
-    plot_distribution_fn: Callable[[list[dict[str, Any]], Path], None],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
-    token_count_rows = sorted(
-        [row for pair_records in surviving_pairs.values() for row in pair_records],
-        key=lambda row: (
-            row['pair_id'],
-            ROLE_SORT_ORDER.get(str(row['role']), 99),
-            row['slice_filename'],
-        ),
-    )
-    if not request.minimal_outputs:
-        _write_token_counts_csv(token_count_rows, request.export_paths.token_counts_csv)
-        plot_distribution_fn(token_count_rows, request.export_paths.token_distribution_png)
-
-    split_assignments = request.split_assignments_fn(list(surviving_pairs.keys()))
-    ordered_rows, pair_ids_by_dataset_type = _build_ordered_rows(surviving_pairs, split_assignments)
-    kept_unique_id_by_pair_role = _write_dataset_csv_and_slices(
-        ordered_rows,
-        request.export_paths.csv_path,
-        request.export_paths.normalized_slices_dir,
-    )
-
-    for audit_row in dedup_audit_rows:
-        matched_pair_id = str(audit_row.get('matched_kept_pair_id') or '')
-        matched_role = str(audit_row.get('matched_kept_role') or '')
-        if matched_pair_id and matched_role:
-            audit_row['matched_kept_unique_id'] = str(
-                kept_unique_id_by_pair_role.get((matched_pair_id, matched_role), '')
-            )
-
-    if not request.minimal_outputs:
-        _write_dedup_audit_csv(dedup_audit_rows, request.export_paths.dedup_dropped_csv)
-    return token_count_rows, ordered_rows, pair_ids_by_dataset_type
+    return surviving_pairs, dedup_summary
 
 
 def _build_split_manifest(
@@ -473,57 +334,30 @@ def _build_split_manifest(
     }
 
 
-def _build_summary_payload(
+def _build_summary_stats(
     *,
-    request: DatasetExportRequest,
-    runtime: ExportRuntime,
     accumulator: ExportAccumulator,
     dedup_summary: dict[str, Any],
     surviving_pairs: dict[str, list[dict[str, Any]]],
     pair_ids_by_dataset_type: dict[str, list[str]],
     ordered_rows: list[dict[str, Any]],
-    token_count_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    token_values = [int(row['code_token_count']) for row in token_count_rows]
-    mean_value = (sum(token_values) / len(token_values)) if token_values else 0.0
-    sorted_values = sorted(token_values)
-    median_value = sorted_values[len(sorted_values) // 2] if sorted_values else 0
-
-    summary_payload: dict[str, Any] = {}
-    if request.dataset_basename is not None:
-        summary_payload['dataset_basename'] = request.dataset_basename
-    summary_payload.update(
-        {
-            'dedup': dedup_summary,
-            'token_stats': {
-                'total': len(token_values),
-                'mean': round(mean_value, 6),
-                'median': median_value,
-                'over_limit_count': sum(
-                    1 for value in token_values if value > runtime.content_token_limit
-                ),
-            },
-            'filtered_pair_reasons': dict(accumulator.filtered_pair_reasons),
-            'counts': {
-                'pairs_total': int(accumulator.counts['pairs_total']),
-                'pairs_survived': len(surviving_pairs),
-                'pairs_filtered_out': sum(accumulator.filtered_pair_reasons.values()),
-                'rows_written': len(ordered_rows),
-                'train_val_pairs': len(pair_ids_by_dataset_type.get('train_val', [])),
-                'test_pairs': len(pair_ids_by_dataset_type.get('test', [])),
-            },
-        }
-    )
-    return summary_payload
+    return {
+        'dedup': dedup_summary,
+        'filtered_pair_reasons': dict(accumulator.filtered_pair_reasons),
+        'counts': {
+            'pairs_total': int(accumulator.counts['pairs_total']),
+            'pairs_survived': len(surviving_pairs),
+            'pairs_filtered_out': sum(accumulator.filtered_pair_reasons.values()),
+            'rows_written': len(ordered_rows),
+            'train_val_pairs': len(pair_ids_by_dataset_type.get('train_val', [])),
+            'test_pairs': len(pair_ids_by_dataset_type.get('test', [])),
+        },
+    }
 
 
 def run_step07_export_core(request: DatasetExportRequest) -> dict[str, Any]:
-    from shared.slice_tokenizer import (
-        CONTENT_TOKEN_LIMIT,
-        count_code_tokens,
-        load_tokenizer,
-        plot_distribution,
-    )
+    from shared.slice_tokenizer import CONTENT_TOKEN_LIMIT, count_code_tokens, load_tokenizer
 
     _prepare_export_outputs(export_paths=request.export_paths)
 
@@ -536,56 +370,31 @@ def run_step07_export_core(request: DatasetExportRequest) -> dict[str, Any]:
     )
 
     accumulator = _collect_surviving_pairs(request, runtime)
-    surviving_pairs, dedup_summary, dedup_audit_rows = _apply_dedup(
+    surviving_pairs, dedup_summary = _apply_dedup(
         accumulator,
         dedup_mode=request.dedup_mode,
     )
-    token_count_rows, ordered_rows, pair_ids_by_dataset_type = _write_export_artifacts(
-        request=request,
-        surviving_pairs=surviving_pairs,
-        dedup_audit_rows=dedup_audit_rows,
-        plot_distribution_fn=plot_distribution,
+    split_assignments = request.split_assignments_fn(list(surviving_pairs.keys()))
+    ordered_rows, pair_ids_by_dataset_type = _build_ordered_rows(surviving_pairs, split_assignments)
+    _write_dataset_csv_and_slices(
+        ordered_rows,
+        request.export_paths['csv_path'],
+        request.export_paths['normalized_slices_dir'],
     )
 
     split_manifest = _build_split_manifest(
         pair_ids_by_dataset_type,
         surviving_pairs_total=len(surviving_pairs),
     )
-    counts = {
-        'pairs_total': int(accumulator.counts['pairs_total']),
-        'pairs_survived': len(surviving_pairs),
-        'pairs_filtered_out': sum(accumulator.filtered_pair_reasons.values()),
-        'rows_written': len(ordered_rows),
-        'train_val_pairs': len(pair_ids_by_dataset_type.get('train_val', [])),
-        'test_pairs': len(pair_ids_by_dataset_type.get('test', [])),
-    }
+    write_json(request.export_paths['split_manifest_json'], split_manifest)
 
-    write_json(request.export_paths.split_manifest_json, split_manifest)
-    if not request.minimal_outputs:
-        summary_payload = _build_summary_payload(
-            request=request,
-            runtime=runtime,
-            accumulator=accumulator,
-            dedup_summary=dedup_summary,
-            surviving_pairs=surviving_pairs,
-            pair_ids_by_dataset_type=pair_ids_by_dataset_type,
-            ordered_rows=ordered_rows,
-            token_count_rows=token_count_rows,
-        )
-        write_summary_json(request.export_paths.summary_json, summary_payload)
-    dataset_fields = ('output_dir', 'csv_path', 'normalized_slices_dir', 'split_manifest_json')
-    if not request.minimal_outputs:
-        dataset_fields = (
-            'output_dir',
-            'csv_path',
-            'dedup_dropped_csv',
-            'normalized_slices_dir',
-            'token_counts_csv',
-            'token_distribution_png',
-            'split_manifest_json',
-            'summary_json',
-        )
-    return {
-        'dataset': request.export_paths.to_payload(include=dataset_fields),
-        'counts': counts,
-    }
+    artifacts = path_strings(request.export_paths)
+    stats = _build_summary_stats(
+        accumulator=accumulator,
+        dedup_summary=dedup_summary,
+        surviving_pairs=surviving_pairs,
+        pair_ids_by_dataset_type=pair_ids_by_dataset_type,
+        ordered_rows=ordered_rows,
+    )
+    write_stage_summary(request.export_paths['summary_json'], artifacts=artifacts, stats=stats)
+    return {'artifacts': artifacts, 'stats': stats}

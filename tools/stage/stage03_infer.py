@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Generator, List, Optional, Set, Tuple
 
 from shared.csvio import write_csv_rows
-from shared.jsonio import write_summary_json
+from shared.jsonio import write_stage_summary
 from shared.paths import (
     GLOBAL_INFER_RESULTS_DIR,
     INFER_BIN,
@@ -351,7 +351,6 @@ def run_infer_and_signature(
     infer_results_root: Optional[Path],
     signatures_root: Path,
     summary_json: Optional[Path],
-    minimal_outputs: bool = False,
 ) -> dict[str, object]:
     pulse_taint_config = pulse_taint_config.resolve()
     if not pulse_taint_config.exists():
@@ -394,12 +393,6 @@ def run_infer_and_signature(
                 cwe_dir, str(infer_run_dir), str(pulse_taint_config)
             )
 
-    result_csv: Path | None = None
-    no_issue_txt: Path | None = None
-    if not minimal_outputs:
-        result_csv = generate_result_csv(result_map, str(infer_run_dir))
-        no_issue_txt = generate_no_issue_files(result_map, str(infer_run_dir))
-
     signature_output_dir = generate_signatures(
         input_dir=Path(infer_run_dir),
         output_root=Path(signatures_root),
@@ -415,24 +408,22 @@ def run_infer_and_signature(
         'total_cases': sum(v['total_cases'] for v in compact.values()),
         'elapsed_seconds': sum(float(v['time']) for v in compact.values()),
     }
-    summary_payload = {
-        'pulse_taint_config': str(pulse_taint_config),
-        'infer_results_root': str(infer_results_root),
+    artifacts = {
         'infer_run_dir': str(infer_run_dir),
-        'infer_run_name': infer_run_dir.name,
-        'signatures_root': str(signatures_root),
         'signature_output_dir': str(signature_output_dir),
         'signature_non_empty_dir': str(signature_non_empty_dir),
-        'result_by_target': compact,
-        'totals': totals,
     }
-    if result_csv is not None:
-        summary_payload['analysis_result_csv'] = str(result_csv)
-    if no_issue_txt is not None:
-        summary_payload['analysis_no_issue_files'] = str(no_issue_txt)
+    stats = {
+        'issue': totals['issue'],
+        'no_issue': totals['no_issue'],
+        'error': totals['error'],
+        'total_cases': totals['total_cases'],
+        'elapsed_seconds': totals['elapsed_seconds'],
+        'targets_analyzed': len(compact),
+    }
 
     if summary_json is not None:
         summary_json = summary_json.resolve()
-        write_summary_json(summary_json, summary_payload, echo=False)
+        write_stage_summary(summary_json, artifacts=artifacts, stats=stats, echo=False)
 
-    return summary_payload
+    return {'artifacts': artifacts, 'stats': stats}
