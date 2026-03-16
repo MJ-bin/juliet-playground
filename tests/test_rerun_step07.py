@@ -113,23 +113,42 @@ def test_main_only_07b_uses_existing_output_dir(tmp_path, monkeypatch):
     assert called['run_suffix'] == '20260313_140000'
 
 
-def test_rerun_step07b_passes_prefix_args_and_overwrite_to_subprocess(tmp_path, monkeypatch):
+def test_rerun_step07b_passes_prefix_args_and_overwrite_to_api(tmp_path, monkeypatch):
     module = load_module_from_path(
-        'test_rerun_step07_subprocess',
+        'test_rerun_step07_api',
         REPO_ROOT / 'tools/stage/rerun_step07.py',
     )
 
     captured: dict[str, object] = {}
 
-    class Proc:
-        returncode = 0
+    def fake_export_patched_dataset(params):
+        captured['params'] = params
+        return module.PatchedDatasetExportResult(
+            dataset_basename='train_patched_counterparts',
+            run_dir=params.run_dir,
+            pair_dir=params.pair_dir,
+            dataset_export_dir=params.dataset_export_dir,
+            signature_output_dir=params.signature_output_dir,
+            slice_output_dir=params.slice_output_dir,
+            slice_dir=params.slice_output_dir / 'slice',
+            slice_summary_json=params.slice_output_dir / 'summary.json',
+            selection_summary_json=params.selection_summary_json,
+            pairs_jsonl=params.output_pairs_jsonl,
+            csv_path=params.dataset_export_dir / 'train_patched_counterparts.csv',
+            dedup_dropped_csv=params.dataset_export_dir
+            / 'train_patched_counterparts_dedup_dropped.csv',
+            normalized_slices_dir=params.dataset_export_dir / 'train_patched_counterparts_slices',
+            token_counts_csv=params.dataset_export_dir
+            / 'train_patched_counterparts_token_counts.csv',
+            token_distribution_png=params.dataset_export_dir
+            / 'train_patched_counterparts_token_distribution.png',
+            split_manifest_json=params.dataset_export_dir
+            / 'train_patched_counterparts_split_manifest.json',
+            dedup_mode=params.dedup_mode,
+            summary_json=params.dataset_export_dir / 'train_patched_counterparts_summary.json',
+        )
 
-    def fake_run(cmd, cwd):
-        captured['cmd'] = cmd
-        captured['cwd'] = cwd
-        return Proc()
-
-    monkeypatch.setattr(module.subprocess, 'run', fake_run)
+    monkeypatch.setattr(module, 'export_patched_dataset', fake_export_patched_dataset)
 
     run_dir = tmp_path / 'run'
     dataset_export_dir = tmp_path / '07_dataset_export_custom'
@@ -143,9 +162,10 @@ def test_rerun_step07b_passes_prefix_args_and_overwrite_to_subprocess(tmp_path, 
         new_prefix='/new/root',
     )
 
-    cmd = captured['cmd']
-    assert '--overwrite' in cmd
-    assert ['--old-prefix', '/old/root', '--new-prefix', '/new/root'] == cmd[-4:]
+    params = captured['params']
+    assert params.overwrite is True
+    assert params.old_prefix == '/old/root'
+    assert params.new_prefix == '/new/root'
     assert str(
         run_dir / '05_pair_trace_ds' / 'train_patched_counterparts_pairs_suffix123.jsonl'
     ) == str(result['output_pairs_jsonl'])
@@ -183,13 +203,9 @@ def test_rerun_step07_raises_if_export_returns_non_dict(tmp_path, monkeypatch):
         },
     )
 
-    class FakePipelineModule:
-        def export_dataset_from_pipeline(self, **kwargs):
-            return 'not-a-dict'
+    monkeypatch.setattr(module, 'export_primary_dataset', lambda *_args, **_kwargs: 'not-a-result')
 
-    monkeypatch.setattr(module, 'load_module', lambda *_args, **_kwargs: FakePipelineModule())
-
-    with pytest.raises(ValueError, match='non-dict'):
+    with pytest.raises(ValueError, match='non-PrimaryDatasetExportResult'):
         module.rerun_step07(
             run_dir=run_dir,
             output_dir=tmp_path / 'rerun-out',

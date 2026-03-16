@@ -3,20 +3,25 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import importlib.util
 import json
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 from shared import fs as _fs_utils
 from shared.jsonio import load_json
-from shared.paths import PROJECT_HOME, RESULT_DIR
+from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 
+from stage import dataset_export as _dataset_export
+from stage import patched_export as _patched_export
+
 prepare_target = _fs_utils.prepare_target
-remove_target = _fs_utils.remove_target
+PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams
+PrimaryDatasetExportResult = _dataset_export.PrimaryDatasetExportResult
+export_primary_dataset = _dataset_export.export_primary_dataset
+PatchedDatasetExportParams = _patched_export.PatchedDatasetExportParams
+PatchedDatasetExportResult = _patched_export.PatchedDatasetExportResult
+export_patched_dataset = _patched_export.export_patched_dataset
 
 
 def now_ts_compact() -> str:
@@ -181,15 +186,6 @@ def validate_step07_output_dir(output_dir: Path) -> None:
         raise FileNotFoundError(f'Step 07 split_manifest.json not found: {split_manifest_json}')
 
 
-def load_module(module_path: Path, module_name: str):
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f'Failed to load module spec from: {module_path}')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def rerun_step07(
     *, run_dir: Path, output_dir: Path, dedup_mode: str, overwrite: bool
 ) -> dict[str, Any]:
@@ -198,11 +194,6 @@ def rerun_step07(
 
     prepare_target(output_dir, overwrite=overwrite)
 
-    sys.path.insert(0, str(Path(PROJECT_HOME) / 'tools'))
-    pipeline_module = load_module(
-        Path(PROJECT_HOME) / 'tools' / 'run-epic001-pipeline.py', 'run_epic001_pipeline'
-    )
-
     print(f'[Step07] run_dir={run_dir}')
     print(f'[Step07] output_dir={output_dir}')
     print(
@@ -210,18 +201,20 @@ def rerun_step07(
         f'train_ratio={config["train_ratio"]} dedup_mode={dedup_mode}'
     )
 
-    result = pipeline_module.export_dataset_from_pipeline(
-        pairs_jsonl=config['pairs_jsonl'],
-        paired_signatures_dir=config['paired_signatures_dir'],
-        slice_dir=config['slice_dir'],
-        output_dir=output_dir,
-        split_seed=config['split_seed'],
-        train_ratio=config['train_ratio'],
-        dedup_mode=dedup_mode,
+    result = export_primary_dataset(
+        PrimaryDatasetExportParams(
+            pairs_jsonl=config['pairs_jsonl'],
+            paired_signatures_dir=config['paired_signatures_dir'],
+            slice_dir=config['slice_dir'],
+            output_dir=output_dir,
+            split_seed=config['split_seed'],
+            train_ratio=config['train_ratio'],
+            dedup_mode=dedup_mode,
+        )
     )
-    if not isinstance(result, dict):
-        raise ValueError('Step 07 export returned a non-dict result.')
-    return result
+    if not isinstance(result, PrimaryDatasetExportResult):
+        raise ValueError('Step 07 export returned a non-PrimaryDatasetExportResult result.')
+    return result.to_payload()
 
 
 def rerun_step07b(
@@ -242,46 +235,33 @@ def rerun_step07b(
     selection_summary_json = (
         pair_dir / f'train_patched_counterparts_selection_summary_{run_suffix}.json'
     )
+    result = export_patched_dataset(
+        PatchedDatasetExportParams(
+            run_dir=run_dir,
+            pair_dir=pair_dir,
+            dataset_export_dir=dataset_export_dir,
+            signature_output_dir=signature_output_dir,
+            slice_output_dir=slice_output_dir,
+            output_pairs_jsonl=output_pairs_jsonl,
+            selection_summary_json=selection_summary_json,
+            dedup_mode=dedup_mode,
+            overwrite=overwrite,
+            old_prefix=old_prefix,
+            new_prefix=new_prefix,
+        )
+    )
+    if not isinstance(result, PatchedDatasetExportResult):
+        raise ValueError('Step 07b export returned a non-PatchedDatasetExportResult result.')
 
-    cmd = [
-        sys.executable,
-        str(Path(PROJECT_HOME) / 'tools' / 'export_train_patched_counterparts.py'),
-        '--run-dir',
-        str(run_dir),
-        '--dataset-export-dir',
-        str(dataset_export_dir),
-        '--signature-output-dir',
-        str(signature_output_dir),
-        '--slice-output-dir',
-        str(slice_output_dir),
-        '--output-pairs-jsonl',
-        str(output_pairs_jsonl),
-        '--selection-summary-json',
-        str(selection_summary_json),
-        '--dedup-mode',
-        dedup_mode,
-    ]
-    if overwrite:
-        cmd.append('--overwrite')
-    if old_prefix and new_prefix:
-        cmd.extend(['--old-prefix', old_prefix, '--new-prefix', new_prefix])
-
-    print(f'[Step07b] command={" ".join(cmd)}')
-    proc = subprocess.run(cmd, cwd=str(Path(PROJECT_HOME)))
-    if proc.returncode != 0:
-        raise RuntimeError(f'Step 07b failed with return code {proc.returncode}')
-
-    summary_json = dataset_export_dir / 'train_patched_counterparts_summary.json'
-    result = {
-        'command': cmd,
-        'returncode': proc.returncode,
-        'signature_output_dir': str(signature_output_dir),
-        'slice_output_dir': str(slice_output_dir),
-        'output_pairs_jsonl': str(output_pairs_jsonl),
-        'selection_summary_json': str(selection_summary_json),
-        'summary_json': str(summary_json),
+    return {
+        'executor': 'internal',
+        'returncode': 0,
+        'signature_output_dir': str(result.signature_output_dir),
+        'slice_output_dir': str(result.slice_output_dir),
+        'output_pairs_jsonl': str(result.pairs_jsonl),
+        'selection_summary_json': str(result.selection_summary_json),
+        'summary_json': str(result.summary_json),
     }
-    return result
 
 
 def write_rerun_metadata(

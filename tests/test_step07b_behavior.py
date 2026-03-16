@@ -143,9 +143,9 @@ def test_build_train_patched_counterparts_requires_train_val_pairs(tmp_path):
         )
 
 
-def test_main_passes_dedup_mode_to_export_dataset(tmp_path, monkeypatch):
+def test_export_patched_dataset_runs_selection_slice_and_export(tmp_path, monkeypatch):
     module = load_module_from_path(
-        'test_step07b_behavior_main',
+        'test_step07b_behavior_export_api',
         REPO_ROOT / 'tools/stage/patched_export.py',
     )
 
@@ -190,6 +190,73 @@ def test_main_passes_dedup_mode_to_export_dataset(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'process_signature_db', fake_process_signature_db)
     monkeypatch.setattr(module, 'export_dataset', fake_export_dataset)
 
+    result = module.export_patched_dataset(
+        module.PatchedDatasetExportParams(
+            run_dir=run_dir,
+            pair_dir=pair_dir,
+            dataset_export_dir=dataset_export_dir,
+            signature_output_dir=tmp_path / 'sig-out',
+            slice_output_dir=tmp_path / 'slice-out',
+            output_pairs_jsonl=pair_dir / 'train_patched_counterparts_pairs.jsonl',
+            selection_summary_json=pair_dir / 'train_patched_counterparts_selection_summary.json',
+            dedup_mode='none',
+            overwrite=False,
+            old_prefix=None,
+            new_prefix=None,
+        )
+    )
+
+    assert captured['export_args']['dedup_mode'] == 'none'
+    assert captured['build_args']['pair_dir'] == pair_dir
+    assert captured['build_args']['dataset_export_dir'] == dataset_export_dir
+    assert captured['slice_args']['signature_db_dir'] == tmp_path / 'sig-out'
+    assert result.summary_json == dataset_export_dir / 'train_patched_counterparts_summary.json'
+    assert result.slice_summary_json == tmp_path / 'slice-out' / 'summary.json'
+
+
+def test_main_calls_export_patched_dataset(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_step07b_behavior_main',
+        REPO_ROOT / 'tools/stage/patched_export.py',
+    )
+
+    run_dir = tmp_path / 'run'
+    pair_dir = run_dir / '05_pair_trace_ds'
+    dataset_export_dir = run_dir / '07_dataset_export'
+    pair_dir.mkdir(parents=True)
+    dataset_export_dir.mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    def fake_export_patched_dataset(params):
+        captured['params'] = params
+        return module.PatchedDatasetExportResult(
+            dataset_basename='train_patched_counterparts',
+            run_dir=params.run_dir,
+            pair_dir=params.pair_dir,
+            dataset_export_dir=params.dataset_export_dir,
+            signature_output_dir=params.signature_output_dir,
+            slice_output_dir=params.slice_output_dir,
+            slice_dir=params.slice_output_dir / 'slice',
+            slice_summary_json=params.slice_output_dir / 'summary.json',
+            selection_summary_json=params.selection_summary_json,
+            pairs_jsonl=params.output_pairs_jsonl,
+            csv_path=params.dataset_export_dir / 'train_patched_counterparts.csv',
+            dedup_dropped_csv=params.dataset_export_dir
+            / 'train_patched_counterparts_dedup_dropped.csv',
+            normalized_slices_dir=params.dataset_export_dir / 'train_patched_counterparts_slices',
+            token_counts_csv=params.dataset_export_dir
+            / 'train_patched_counterparts_token_counts.csv',
+            token_distribution_png=params.dataset_export_dir
+            / 'train_patched_counterparts_token_distribution.png',
+            split_manifest_json=params.dataset_export_dir
+            / 'train_patched_counterparts_split_manifest.json',
+            dedup_mode=params.dedup_mode,
+            summary_json=params.dataset_export_dir / 'train_patched_counterparts_summary.json',
+        )
+
+    monkeypatch.setattr(module, 'export_patched_dataset', fake_export_patched_dataset)
+
     assert (
         run_module_main(
             module,
@@ -207,7 +274,7 @@ def test_main_passes_dedup_mode_to_export_dataset(tmp_path, monkeypatch):
         == 0
     )
 
-    assert captured['export_args']['dedup_mode'] == 'none'
-    assert captured['build_args']['pair_dir'] == pair_dir
-    assert captured['build_args']['dataset_export_dir'] == dataset_export_dir
-    assert captured['slice_args']['signature_db_dir'] == tmp_path / 'sig-out'
+    params = captured['params']
+    assert params.pair_dir == pair_dir
+    assert params.dataset_export_dir == dataset_export_dir
+    assert params.dedup_mode == 'none'

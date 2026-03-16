@@ -7,11 +7,15 @@ from typing import List, Optional
 import typer
 from shared import step07_dedup as _step07_dedup
 from shared.paths import PROJECT_HOME, PULSE_TAINT_CONFIG, RESULT_DIR
+from stage import dataset_export as _dataset_export
 from stage import pipeline as _pipeline_run
 
-compute_pair_split = _pipeline_run.compute_pair_split
+PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams
+PrimaryDatasetExportResult = _dataset_export.PrimaryDatasetExportResult
+compute_pair_split = _dataset_export.compute_pair_split
 dedupe_pairs_by_normalized_rows = _step07_dedup.dedupe_pairs_by_normalized_rows
-export_dataset_from_pipeline = _pipeline_run.export_dataset_from_pipeline
+export_dataset_from_pipeline = _dataset_export.export_dataset_from_pipeline
+export_primary_dataset = _dataset_export.export_primary_dataset
 
 
 def main(

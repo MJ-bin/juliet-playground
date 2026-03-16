@@ -109,6 +109,30 @@ def extract_defined_function_names(root_node, source_bytes: bytes) -> set[str]:
     return names
 
 
+def collect_defined_function_names(
+    source_path: Path, parsers: dict[str, object]
+) -> tuple[set[str], str | None]:
+    try:
+        source_bytes = source_path.read_bytes()
+    except Exception as exc:
+        return set(), f'read_error:{exc}'
+
+    last_error: str | None = None
+    for language_name in candidate_languages_for_source(source_path):
+        parser = parsers.get(language_name)
+        if parser is None:
+            continue
+        try:
+            tree = parser.parse(source_bytes)
+            return extract_defined_function_names(tree.root_node, source_bytes), None
+        except Exception as exc:
+            last_error = f'{language_name}:{exc}'
+
+    if not parsers:
+        return set(), 'parser_unavailable'
+    return set(), last_error or 'parse_failed'
+
+
 def dedupe_paths(paths: list[Path]) -> list[Path]:
     deduped: list[Path] = []
     seen: set[str] = set()

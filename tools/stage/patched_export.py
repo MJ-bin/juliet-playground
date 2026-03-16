@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,17 +15,72 @@ from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 from shared.signatures import load_signature_payload
 from shared.step07_export_core import run_step07_export_core
-from shared.step07_sources import (
-    build_source_file_candidates,
-    candidate_languages_for_source,
-    extract_defined_function_names,
-)
+from shared.step07_sources import build_source_file_candidates, collect_defined_function_names
 
 from stage.slices import process_signature_db
 
 DATASET_BASENAME = 'train_patched_counterparts'
 prepare_target = _fs_utils.prepare_target
 remove_target = _fs_utils.remove_target
+
+
+@dataclass(frozen=True)
+class PatchedDatasetExportParams:
+    run_dir: Path
+    pair_dir: Path
+    dataset_export_dir: Path
+    signature_output_dir: Path
+    slice_output_dir: Path
+    output_pairs_jsonl: Path
+    selection_summary_json: Path
+    dedup_mode: str
+    overwrite: bool
+    old_prefix: str | None
+    new_prefix: str | None
+
+
+@dataclass(frozen=True)
+class PatchedDatasetExportResult:
+    dataset_basename: str
+    run_dir: Path
+    pair_dir: Path
+    dataset_export_dir: Path
+    signature_output_dir: Path
+    slice_output_dir: Path
+    slice_dir: Path
+    slice_summary_json: Path
+    selection_summary_json: Path
+    pairs_jsonl: Path
+    csv_path: Path
+    dedup_dropped_csv: Path
+    normalized_slices_dir: Path
+    token_counts_csv: Path
+    token_distribution_png: Path
+    split_manifest_json: Path
+    dedup_mode: str
+    summary_json: Path
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            'dataset_basename': self.dataset_basename,
+            'run_dir': str(self.run_dir),
+            'pair_dir': str(self.pair_dir),
+            'dataset_export_dir': str(self.dataset_export_dir),
+            'signature_output_dir': str(self.signature_output_dir),
+            'slice_output_dir': str(self.slice_output_dir),
+            'slice_dir': str(self.slice_dir),
+            'slice_summary_json': str(self.slice_summary_json),
+            'selection_summary_json': str(self.selection_summary_json),
+            'pairs_jsonl': str(self.pairs_jsonl),
+            'csv_path': str(self.csv_path),
+            'dedup_dropped_csv': str(self.dedup_dropped_csv),
+            'normalized_slices_dir': str(self.normalized_slices_dir),
+            'token_counts_csv': str(self.token_counts_csv),
+            'token_distribution_png': str(self.token_distribution_png),
+            'split_manifest_json': str(self.split_manifest_json),
+            'dedup_mode': self.dedup_mode,
+            'summary_json': str(self.summary_json),
+        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -401,30 +457,6 @@ def build_train_patched_counterparts(
     }
 
 
-def collect_defined_function_names(
-    source_path: Path, parsers: dict[str, object]
-) -> tuple[set[str], str | None]:
-    try:
-        source_bytes = source_path.read_bytes()
-    except Exception as exc:
-        return set(), f'read_error:{exc}'
-
-    last_error: str | None = None
-    for language_name in candidate_languages_for_source(source_path):
-        parser = parsers.get(language_name)
-        if parser is None:
-            continue
-        try:
-            tree = parser.parse(source_bytes)
-            return extract_defined_function_names(tree.root_node, source_bytes), None
-        except Exception as exc:
-            last_error = f'{language_name}:{exc}'
-
-    if not parsers:
-        return set(), 'parser_unavailable'
-    return set(), last_error or 'parse_failed'
-
-
 def export_dataset(
     *,
     pairs: list[dict[str, Any]],
@@ -493,6 +525,74 @@ def export_dataset(
     )
 
 
+def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDatasetExportResult:
+    selected = build_train_patched_counterparts(
+        pair_dir=params.pair_dir,
+        dataset_export_dir=params.dataset_export_dir,
+        signature_output_dir=params.signature_output_dir,
+        output_pairs_jsonl=params.output_pairs_jsonl,
+        selection_summary_json=params.selection_summary_json,
+        overwrite=params.overwrite,
+    )
+
+    prepare_target(params.slice_output_dir, overwrite=params.overwrite)
+    params.slice_output_dir.mkdir(parents=True, exist_ok=True)
+    slice_dir = params.slice_output_dir / 'slice'
+    slice_summary = process_signature_db(
+        signature_db_dir=params.signature_output_dir,
+        slice_dir=slice_dir,
+        old_prefix=params.old_prefix,
+        new_prefix=params.new_prefix,
+    )
+    slice_summary_payload = {
+        'dataset_basename': DATASET_BASENAME,
+        'signature_db_dir': str(params.signature_output_dir),
+        'output_dir': str(params.slice_output_dir),
+        'slice_dir': str(slice_dir),
+        'run_dir': str(params.run_dir),
+        'old_prefix': params.old_prefix,
+        'new_prefix': params.new_prefix,
+        **slice_summary,
+    }
+    slice_summary_json = params.slice_output_dir / 'summary.json'
+    prepare_target(slice_summary_json, overwrite=params.overwrite)
+    slice_summary_json.write_text(
+        json.dumps(slice_summary_payload, ensure_ascii=False, indent=2) + '\n',
+        encoding='utf-8',
+    )
+    print(json.dumps(slice_summary_payload, ensure_ascii=False))
+
+    export_result = export_dataset(
+        pairs=selected['pairs'],
+        paired_signatures_dir=params.signature_output_dir,
+        slice_dir=slice_dir,
+        dataset_export_dir=params.dataset_export_dir,
+        overwrite=params.overwrite,
+        dedup_mode=params.dedup_mode,
+    )
+
+    return PatchedDatasetExportResult(
+        dataset_basename=DATASET_BASENAME,
+        run_dir=params.run_dir,
+        pair_dir=params.pair_dir,
+        dataset_export_dir=params.dataset_export_dir,
+        signature_output_dir=params.signature_output_dir,
+        slice_output_dir=params.slice_output_dir,
+        slice_dir=slice_dir,
+        slice_summary_json=slice_summary_json,
+        selection_summary_json=Path(selected['selection_summary_json']),
+        pairs_jsonl=Path(selected['output_pairs_jsonl']),
+        csv_path=Path(export_result['csv_path']),
+        dedup_dropped_csv=Path(export_result['dedup_dropped_csv']),
+        normalized_slices_dir=Path(export_result['normalized_slices_dir']),
+        token_counts_csv=Path(export_result['token_counts_csv']),
+        token_distribution_png=Path(export_result['token_distribution_png']),
+        split_manifest_json=Path(export_result['split_manifest_json']),
+        dedup_mode=params.dedup_mode,
+        summary_json=Path(export_result['summary_json']),
+    )
+
+
 def main() -> int:
     args = parse_args()
     paths = resolve_paths(args)
@@ -523,71 +623,22 @@ def main() -> int:
         else pair_dir / f'{DATASET_BASENAME}_selection_summary.json'
     )
 
-    selected = build_train_patched_counterparts(
-        pair_dir=pair_dir,
-        dataset_export_dir=dataset_export_dir,
-        signature_output_dir=signature_output_dir,
-        output_pairs_jsonl=output_pairs_jsonl,
-        selection_summary_json=selection_summary_json,
-        overwrite=args.overwrite,
+    result = export_patched_dataset(
+        PatchedDatasetExportParams(
+            run_dir=run_dir,
+            pair_dir=pair_dir,
+            dataset_export_dir=dataset_export_dir,
+            signature_output_dir=signature_output_dir,
+            slice_output_dir=slice_output_dir,
+            output_pairs_jsonl=output_pairs_jsonl,
+            selection_summary_json=selection_summary_json,
+            dedup_mode=args.dedup_mode,
+            overwrite=args.overwrite,
+            old_prefix=args.old_prefix,
+            new_prefix=args.new_prefix,
+        )
     )
-
-    prepare_target(slice_output_dir, overwrite=args.overwrite)
-    slice_output_dir.mkdir(parents=True, exist_ok=True)
-    slice_dir = slice_output_dir / 'slice'
-    slice_summary = process_signature_db(
-        signature_db_dir=signature_output_dir,
-        slice_dir=slice_dir,
-        old_prefix=args.old_prefix,
-        new_prefix=args.new_prefix,
-    )
-    slice_summary_payload = {
-        'dataset_basename': DATASET_BASENAME,
-        'signature_db_dir': str(signature_output_dir),
-        'output_dir': str(slice_output_dir),
-        'slice_dir': str(slice_dir),
-        'run_dir': str(run_dir),
-        'old_prefix': args.old_prefix,
-        'new_prefix': args.new_prefix,
-        **slice_summary,
-    }
-    slice_summary_json = slice_output_dir / 'summary.json'
-    prepare_target(slice_summary_json, overwrite=args.overwrite)
-    slice_summary_json.write_text(
-        json.dumps(slice_summary_payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-    )
-    print(json.dumps(slice_summary_payload, ensure_ascii=False))
-
-    export_result = export_dataset(
-        pairs=selected['pairs'],
-        paired_signatures_dir=signature_output_dir,
-        slice_dir=slice_dir,
-        dataset_export_dir=dataset_export_dir,
-        overwrite=args.overwrite,
-        dedup_mode=args.dedup_mode,
-    )
-
-    result = {
-        'dataset_basename': DATASET_BASENAME,
-        'run_dir': str(run_dir),
-        'pair_dir': str(pair_dir),
-        'dataset_export_dir': str(dataset_export_dir),
-        'signature_output_dir': str(signature_output_dir),
-        'slice_output_dir': str(slice_output_dir),
-        'slice_dir': str(slice_dir),
-        'slice_summary_json': str(slice_summary_json),
-        'selection_summary_json': str(selected['selection_summary_json']),
-        'pairs_jsonl': str(selected['output_pairs_jsonl']),
-        'csv_path': str(export_result['csv_path']),
-        'dedup_dropped_csv': str(export_result['dedup_dropped_csv']),
-        'normalized_slices_dir': str(export_result['normalized_slices_dir']),
-        'token_counts_csv': str(export_result['token_counts_csv']),
-        'token_distribution_png': str(export_result['token_distribution_png']),
-        'split_manifest_json': str(export_result['split_manifest_json']),
-        'dedup_mode': args.dedup_mode,
-        'summary_json': str(export_result['summary_json']),
-    }
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result.to_payload(), ensure_ascii=False))
     return 0
 
 

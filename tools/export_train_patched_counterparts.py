@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from stage import patched_export as _patched_counterparts
 
+PatchedDatasetExportParams = _patched_counterparts.PatchedDatasetExportParams
+PatchedDatasetExportResult = _patched_counterparts.PatchedDatasetExportResult
 build_train_patched_counterparts = _patched_counterparts.build_train_patched_counterparts
 export_dataset = _patched_counterparts.export_dataset
+export_patched_dataset = _patched_counterparts.export_patched_dataset
 find_latest_pipeline_run_dir = _patched_counterparts.find_latest_pipeline_run_dir
 infer_run_dir_from_pair_dir = _patched_counterparts.infer_run_dir_from_pair_dir
 parse_args = _patched_counterparts.parse_args

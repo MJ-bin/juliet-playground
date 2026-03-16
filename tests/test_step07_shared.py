@@ -3,10 +3,10 @@ from __future__ import annotations
 from tests.helpers import REPO_ROOT, load_module_from_path, write_jsonl
 
 
-def test_pipeline_run_uses_shared_step07_core(tmp_path, monkeypatch):
+def test_primary_dataset_export_uses_shared_step07_core(tmp_path, monkeypatch):
     module = load_module_from_path(
-        'test_step07_shared_pipeline',
-        REPO_ROOT / 'tools/stage/pipeline.py',
+        'test_step07_shared_primary',
+        REPO_ROOT / 'tools/stage/dataset_export.py',
     )
 
     pairs_jsonl = tmp_path / 'pairs.jsonl'

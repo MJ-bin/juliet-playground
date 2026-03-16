@@ -5,27 +5,30 @@ import datetime
 import hashlib
 import io
 import json
-import random
 import shlex
 import subprocess
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import typer
 from shared.paths import PROJECT_HOME, PULSE_TAINT_CONFIG, RESULT_DIR
-from shared.step07_export_core import run_step07_export_core
-from shared.step07_sources import (
-    build_source_file_candidates,
-    candidate_languages_for_source,
-    extract_defined_function_names,
-)
 
+from stage import dataset_export as _dataset_export
 from stage import pair_trace as _pair_trace
 from stage import slices as _slices
 from stage import trace_flow as _trace_flow
+
+PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams
+PrimaryDatasetExportResult = _dataset_export.PrimaryDatasetExportResult
+build_source_file_candidates = _dataset_export.build_source_file_candidates
+collect_defined_function_names = _dataset_export.collect_defined_function_names
+compute_pair_split = _dataset_export.compute_pair_split
+export_dataset_from_pipeline = _dataset_export.export_dataset_from_pipeline
+export_primary_dataset = _dataset_export.export_primary_dataset
+load_pairs_jsonl = _dataset_export.load_pairs_jsonl
 
 
 def now_ts() -> str:
@@ -137,150 +140,6 @@ def run_internal_step(
     }
     result.update(result_payload)
     return result
-
-
-def collect_defined_function_names(
-    source_path: Path, parsers: dict[str, object]
-) -> tuple[set[str], str | None]:
-    try:
-        source_bytes = source_path.read_bytes()
-    except Exception as exc:
-        return set(), f'read_error:{exc}'
-
-    last_error: str | None = None
-    for language_name in candidate_languages_for_source(source_path):
-        parser = parsers.get(language_name)
-        if parser is None:
-            continue
-        try:
-            tree = parser.parse(source_bytes)
-            return extract_defined_function_names(tree.root_node, source_bytes), None
-        except Exception as exc:  # pragma: no cover - parser errors are rare and data-dependent
-            last_error = f'{language_name}:{exc}'
-
-    if not parsers:
-        return set(), 'parser_unavailable'
-    return set(), last_error or 'parse_failed'
-
-
-def load_pairs_jsonl(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with path.open('r', encoding='utf-8') as f:
-        for lineno, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            pair_id = obj.get('pair_id')
-            testcase_key = obj.get('testcase_key')
-            if not pair_id or not testcase_key:
-                raise ValueError(f'Missing pair_id/testcase_key at line {lineno} in {path}')
-            records.append(obj)
-    return records
-
-
-def compute_pair_split(pair_ids: list[str], train_ratio: float, seed: int) -> dict[str, str]:
-    keys = sorted(set(pair_ids))
-    shuffled = list(keys)
-    random.Random(seed).shuffle(shuffled)
-
-    test_ratio = 1.0 - train_ratio
-    test_count = int(round(len(shuffled) * test_ratio))
-    if len(shuffled) > 1:
-        test_count = max(1, min(len(shuffled) - 1, test_count))
-    else:
-        test_count = 0
-
-    test_keys = set(shuffled[:test_count])
-    split_map: dict[str, str] = {}
-    for key in shuffled:
-        split_map[key] = 'test' if key in test_keys else 'train_val'
-    return split_map
-
-
-def export_dataset_from_pipeline(
-    *,
-    pairs_jsonl: Path,
-    paired_signatures_dir: Path,
-    slice_dir: Path,
-    output_dir: Path,
-    split_seed: int,
-    train_ratio: float,
-    dedup_mode: str,
-) -> dict[str, object]:
-    if not pairs_jsonl.exists():
-        raise FileNotFoundError(f'Pairs JSONL not found: {pairs_jsonl}')
-    if not paired_signatures_dir.exists():
-        raise FileNotFoundError(f'Paired signatures dir not found: {paired_signatures_dir}')
-    if not slice_dir.exists():
-        raise FileNotFoundError(f'Slice dir not found: {slice_dir}')
-    if not (0.0 < train_ratio < 1.0):
-        raise ValueError(f'train_ratio must be between 0 and 1: {train_ratio}')
-    if dedup_mode not in {'none', 'row'}:
-        raise ValueError(f'Unsupported dedup_mode: {dedup_mode}')
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    normalized_slices_dir = output_dir / 'normalized_slices'
-    real_vul_data_csv = output_dir / 'Real_Vul_data.csv'
-    dedup_dropped_csv = output_dir / 'Real_Vul_data_dedup_dropped.csv'
-    normalized_token_counts_csv = output_dir / 'normalized_token_counts.csv'
-    slice_token_distribution_png = output_dir / 'slice_token_distribution.png'
-    split_manifest_json = output_dir / 'split_manifest.json'
-    summary_json = output_dir / 'summary.json'
-
-    pairs = load_pairs_jsonl(pairs_jsonl)
-
-    result = run_step07_export_core(
-        pairs=pairs,
-        paired_signatures_dir=paired_signatures_dir,
-        slice_dir=slice_dir,
-        csv_path=real_vul_data_csv,
-        dedup_dropped_csv=dedup_dropped_csv,
-        normalized_slices_dir=normalized_slices_dir,
-        token_counts_csv=normalized_token_counts_csv,
-        token_distribution_png=slice_token_distribution_png,
-        split_manifest_json=split_manifest_json,
-        summary_json=summary_json,
-        dedup_mode=dedup_mode,
-        split_assignments_fn=lambda pair_ids: compute_pair_split(
-            pair_ids, train_ratio=train_ratio, seed=split_seed
-        ),
-        summary_metadata={
-            'pairs_jsonl': str(pairs_jsonl),
-            'paired_signatures_dir': str(paired_signatures_dir),
-            'slice_dir': str(slice_dir),
-            'output_dir': str(output_dir),
-            'real_vul_data_csv': str(real_vul_data_csv),
-            'normalized_token_counts_csv': str(normalized_token_counts_csv),
-            'slice_token_distribution_png': str(slice_token_distribution_png),
-            'seed': split_seed,
-            'train_ratio': train_ratio,
-            'test_ratio': round(1.0 - train_ratio, 6),
-        },
-        split_manifest_metadata={
-            'output_dir': str(output_dir),
-            'pairs_jsonl': str(pairs_jsonl),
-            'paired_signatures_dir': str(paired_signatures_dir),
-            'slice_dir': str(slice_dir),
-            'split_unit': 'pair_id',
-            'train_ratio': train_ratio,
-            'test_ratio': round(1.0 - train_ratio, 6),
-            'seed': split_seed,
-        },
-        collect_defined_function_names_fn=collect_defined_function_names,
-        build_source_file_candidates_fn=build_source_file_candidates,
-    )
-
-    return {
-        'summary_json': str(result['summary_json']),
-        'output_dir': str(output_dir),
-        'normalized_slices_dir': str(result['normalized_slices_dir']),
-        'real_vul_data_csv': str(real_vul_data_csv),
-        'dedup_dropped_csv': str(result['dedup_dropped_csv']),
-        'normalized_token_counts_csv': str(result['token_counts_csv']),
-        'slice_token_distribution_png': str(result['token_distribution_png']),
-        'split_manifest_json': str(result['split_manifest_json']),
-    }
 
 
 def main(
@@ -674,15 +533,17 @@ def main(
         steps['07_dataset_export'] = run_internal_step(
             '07_dataset_export',
             logs_dir=logs_dir,
-            fn=lambda: export_dataset_from_pipeline(
-                pairs_jsonl=pairs_jsonl,
-                paired_signatures_dir=paired_signatures_dir,
-                slice_dir=slice_dir,
-                output_dir=dataset_stage_dir,
-                split_seed=pair_split_seed,
-                train_ratio=pair_train_ratio,
-                dedup_mode=dedup_mode,
-            ),
+            fn=lambda: export_primary_dataset(
+                PrimaryDatasetExportParams(
+                    pairs_jsonl=pairs_jsonl,
+                    paired_signatures_dir=paired_signatures_dir,
+                    slice_dir=slice_dir,
+                    output_dir=dataset_stage_dir,
+                    split_seed=pair_split_seed,
+                    train_ratio=pair_train_ratio,
+                    dedup_mode=dedup_mode,
+                )
+            ).to_payload(),
         )
 
         if not normalized_slices_dir.exists():
