@@ -14,10 +14,9 @@ from shared.artifact_layout import (
     build_patched_pairing_paths,
     build_slice_stage_paths,
 )
-from shared.dataset_export_core import run_configured_step07_export, run_step07_export_core
+from shared.dataset_export_core import run_step07_export_core, run_step07_export_wrapper
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
 from shared.jsonio import load_jsonl, write_json, write_jsonl
-from shared.pair_dataset import build_pair_dataset_row, write_pair_signature_exports
 from shared.pairing import (
     build_pairing_meta,
     build_signature_meta,
@@ -25,7 +24,7 @@ from shared.pairing import (
     make_pair_id,
 )
 from shared.paths import RESULT_DIR
-from shared.pipeline_layout import require_existing_dir, resolve_run_dir, validate_prefix_pair
+from shared.pipeline_runs import find_latest_pipeline_run_dir
 from shared.signatures import load_signature_payload
 
 from stage.stage06_slices import generate_slices
@@ -49,50 +48,6 @@ class PatchedDatasetExportParams:
     new_prefix: str | None
 
 
-@dataclass(frozen=True)
-class PatchedDatasetExportResult:
-    dataset_basename: str
-    run_dir: Path
-    pair_dir: Path
-    dataset_export_dir: Path
-    signature_output_dir: Path
-    slice_output_dir: Path
-    slice_dir: Path
-    slice_summary_json: Path
-    selection_summary_json: Path
-    pairs_jsonl: Path
-    csv_path: Path
-    dedup_dropped_csv: Path
-    normalized_slices_dir: Path
-    token_counts_csv: Path
-    token_distribution_png: Path
-    split_manifest_json: Path
-    dedup_mode: str
-    summary_json: Path
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            'dataset_basename': self.dataset_basename,
-            'run_dir': str(self.run_dir),
-            'pair_dir': str(self.pair_dir),
-            'dataset_export_dir': str(self.dataset_export_dir),
-            'signature_output_dir': str(self.signature_output_dir),
-            'slice_output_dir': str(self.slice_output_dir),
-            'slice_dir': str(self.slice_dir),
-            'slice_summary_json': str(self.slice_summary_json),
-            'selection_summary_json': str(self.selection_summary_json),
-            'pairs_jsonl': str(self.pairs_jsonl),
-            'csv_path': str(self.csv_path),
-            'dedup_dropped_csv': str(self.dedup_dropped_csv),
-            'normalized_slices_dir': str(self.normalized_slices_dir),
-            'token_counts_csv': str(self.token_counts_csv),
-            'token_distribution_png': str(self.token_distribution_png),
-            'split_manifest_json': str(self.split_manifest_json),
-            'dedup_mode': self.dedup_mode,
-            'summary_json': str(self.summary_json),
-        }
-
-
 def infer_run_dir_from_pair_dir(pair_dir: Path) -> Path | None:
     if pair_dir.name != '05_pair_trace_ds':
         return None
@@ -108,21 +63,17 @@ def resolve_paths(
     slice_output_dir: Path | None = None,
     pipeline_root: Path = Path(RESULT_DIR) / 'pipeline-runs',
 ) -> dict[str, Path | None]:
-    resolved_run_dir = resolve_run_dir(
-        run_dir=run_dir,
-        pipeline_root=pipeline_root,
-        inferred_from_path=pair_dir,
-        infer_run_dir_fn=infer_run_dir_from_pair_dir,
-        use_latest_if_unresolved=pair_dir is None,
-    )
+    resolved_run_dir: Path | None
     if run_dir is not None:
+        resolved_run_dir = run_dir.resolve()
         resolved_pair_dir = (
             pair_dir.resolve() if pair_dir is not None else resolved_run_dir / '05_pair_trace_ds'
         )
     elif pair_dir is not None:
         resolved_pair_dir = pair_dir.resolve()
+        resolved_run_dir = infer_run_dir_from_pair_dir(resolved_pair_dir)
     else:
-        assert resolved_run_dir is not None
+        resolved_run_dir = find_latest_pipeline_run_dir(pipeline_root.resolve())
         resolved_pair_dir = resolved_run_dir / '05_pair_trace_ds'
 
     if dataset_export_dir is None:
@@ -165,17 +116,16 @@ def validate_args(
 ) -> None:
     if pair_dir is None or dataset_export_dir is None:
         raise ValueError('Resolved pair_dir and dataset_export_dir are required.')
-    require_existing_dir(
-        pair_dir,
-        missing_message=f'Pair dir not found: {pair_dir}',
-        not_dir_message=f'Pair dir is not a directory: {pair_dir}',
-    )
-    require_existing_dir(
-        dataset_export_dir,
-        missing_message=f'Dataset export dir not found: {dataset_export_dir}',
-        not_dir_message=f'Dataset export dir is not a directory: {dataset_export_dir}',
-    )
-    validate_prefix_pair(old_prefix, new_prefix)
+    if not pair_dir.exists():
+        raise FileNotFoundError(f'Pair dir not found: {pair_dir}')
+    if not pair_dir.is_dir():
+        raise NotADirectoryError(f'Pair dir is not a directory: {pair_dir}')
+    if not dataset_export_dir.exists():
+        raise FileNotFoundError(f'Dataset export dir not found: {dataset_export_dir}')
+    if not dataset_export_dir.is_dir():
+        raise NotADirectoryError(f'Dataset export dir is not a directory: {dataset_export_dir}')
+    if bool(old_prefix) != bool(new_prefix):
+        raise ValueError('--old-prefix and --new-prefix must be provided together.')
 
 
 def leftover_sort_key(record: dict[str, Any]) -> tuple[Any, ...]:
@@ -277,55 +227,56 @@ def build_train_patched_counterparts(
             dataset_namespace=DATASET_BASENAME,
         )
 
-        output_files = write_pair_signature_exports(
-            signatures_dir=signature_output_dir,
+        testcase_dir = signature_output_dir / testcase_key
+        testcase_dir.mkdir(parents=True, exist_ok=True)
+        b2b_output_path = testcase_dir / 'b2b.json'
+        counterpart_output_path = testcase_dir / f'{counterpart_flow_type}.json'
+
+        b2b_export = dict(b2b_payload)
+        b2b_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
             testcase_key=testcase_key,
-            counterpart_flow_type=counterpart_flow_type,
-            b2b_payload=b2b_payload,
-            b2b_pairing_meta=build_pairing_meta(
-                pair_id=pair_id,
-                testcase_key=testcase_key,
-                role='b2b',
-                selection_reason='train_val_primary_pair',
-                source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
-                trace_file=str(primary_pair.get('b2b_trace_file') or ''),
-                best_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
-                bug_trace_length=int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
-            ),
-            counterpart_payload=counterpart_payload,
-            counterpart_pairing_meta=build_pairing_meta(
-                pair_id=pair_id,
-                testcase_key=testcase_key,
-                role='counterpart',
-                selection_reason='top_leftover_train_val',
-                source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
-                trace_file=str(selected_leftover.get('trace_file') or ''),
-                best_flow_type=counterpart_flow_type,
-                bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
-                leftover_rank=1,
-                leftover_candidates_total=len(candidate_leftovers),
-            ),
+            role='b2b',
+            selection_reason='train_val_primary_pair',
+            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
+            trace_file=str(primary_pair.get('b2b_trace_file') or ''),
+            best_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
+            bug_trace_length=int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
+        )
+        counterpart_export = dict(counterpart_payload)
+        counterpart_export['pairing_meta'] = build_pairing_meta(
+            pair_id=pair_id,
+            testcase_key=testcase_key,
+            role='counterpart',
+            selection_reason='top_leftover_train_val',
+            source_primary_pair_id=str(primary_pair.get('pair_id') or '') or None,
+            trace_file=str(selected_leftover.get('trace_file') or ''),
+            best_flow_type=counterpart_flow_type,
+            bug_trace_length=int(selected_leftover.get('bug_trace_length', 0) or 0),
+            leftover_rank=1,
+            leftover_candidates_total=len(candidate_leftovers),
         )
 
+        write_json(b2b_output_path, b2b_export)
+        write_json(counterpart_output_path, counterpart_export)
+
         selected_pairs.append(
-            build_pair_dataset_row(
-                pair_id=pair_id,
-                testcase_key=testcase_key,
-                selection_reason='top_leftover_train_val',
-                leading_fields={
-                    'source_primary_pair_id': primary_pair.get('pair_id'),
-                    'source_primary_dataset_type': 'train_val',
-                },
-                b2b_flow_type=str(primary_pair.get('b2b_flow_type') or ''),
-                b2b_trace_file=str(primary_pair.get('b2b_trace_file') or ''),
-                b2b_bug_trace_length=int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
-                b2b_signature=primary_pair.get('b2b_signature'),
-                counterpart_flow_type=counterpart_flow_type,
-                counterpart_trace_file=str(selected_leftover.get('trace_file') or ''),
-                counterpart_bug_trace_length=int(
+            {
+                'pair_id': pair_id,
+                'testcase_key': testcase_key,
+                'selection_reason': 'top_leftover_train_val',
+                'source_primary_pair_id': primary_pair.get('pair_id'),
+                'source_primary_dataset_type': 'train_val',
+                'b2b_flow_type': str(primary_pair.get('b2b_flow_type') or ''),
+                'b2b_trace_file': str(primary_pair.get('b2b_trace_file') or ''),
+                'b2b_bug_trace_length': int(primary_pair.get('b2b_bug_trace_length', 0) or 0),
+                'b2b_signature': primary_pair.get('b2b_signature'),
+                'counterpart_flow_type': counterpart_flow_type,
+                'counterpart_trace_file': str(selected_leftover.get('trace_file') or ''),
+                'counterpart_bug_trace_length': int(
                     selected_leftover.get('bug_trace_length', 0) or 0
                 ),
-                counterpart_signature=build_signature_meta(
+                'counterpart_signature': build_signature_meta(
                     payload=counterpart_payload,
                     trace_file=str(selected_leftover.get('trace_file') or ''),
                     best_flow_type=counterpart_flow_type,
@@ -334,8 +285,11 @@ def build_train_patched_counterparts(
                     primary_file=selected_leftover.get('primary_file'),
                     primary_line=selected_leftover.get('primary_line'),
                 ),
-                output_files=output_files,
-            )
+                'output_files': {
+                    'b2b': str(b2b_output_path),
+                    counterpart_flow_type: str(counterpart_output_path),
+                },
+            }
         )
         selection_counts['selected_pairs'] += 1
         selection_counts[f'selected_counterpart_flow_{counterpart_flow_type}'] += 1
@@ -377,7 +331,7 @@ def export_dataset(
     dedup_mode: str,
 ) -> dict[str, Any]:
     export_paths = build_dataset_export_paths(dataset_export_dir, DATASET_BASENAME)
-    export_result, _export_paths = run_configured_step07_export(
+    return run_step07_export_wrapper(
         pairs=pairs,
         paired_signatures_dir=paired_signatures_dir,
         slice_dir=slice_dir,
@@ -406,10 +360,9 @@ def export_dataset(
         build_source_file_candidates_fn=build_source_file_candidates,
         run_step07_export_core_fn=run_step07_export_core,
     )
-    return export_result
 
 
-def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDatasetExportResult:
+def export_patched_dataset(params: PatchedDatasetExportParams) -> dict[str, object]:
     selected = build_train_patched_counterparts(
         pair_dir=params.pair_dir,
         dataset_export_dir=params.dataset_export_dir,
@@ -443,23 +396,23 @@ def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDataset
         dedup_mode=params.dedup_mode,
     )
 
-    return PatchedDatasetExportResult(
-        dataset_basename=DATASET_BASENAME,
-        run_dir=params.run_dir,
-        pair_dir=params.pair_dir,
-        dataset_export_dir=params.dataset_export_dir,
-        signature_output_dir=params.signature_output_dir,
-        slice_output_dir=params.slice_output_dir,
-        slice_dir=slice_dir,
-        slice_summary_json=slice_summary_json,
-        selection_summary_json=Path(selected['selection_summary_json']),
-        pairs_jsonl=Path(selected['output_pairs_jsonl']),
-        csv_path=Path(export_result['csv_path']),
-        dedup_dropped_csv=Path(export_result['dedup_dropped_csv']),
-        normalized_slices_dir=Path(export_result['normalized_slices_dir']),
-        token_counts_csv=Path(export_result['token_counts_csv']),
-        token_distribution_png=Path(export_result['token_distribution_png']),
-        split_manifest_json=Path(export_result['split_manifest_json']),
-        dedup_mode=params.dedup_mode,
-        summary_json=Path(export_result['summary_json']),
-    )
+    return {
+        'dataset_basename': DATASET_BASENAME,
+        'run_dir': str(params.run_dir),
+        'pair_dir': str(params.pair_dir),
+        'dataset_export_dir': str(params.dataset_export_dir),
+        'signature_output_dir': str(params.signature_output_dir),
+        'slice_output_dir': str(params.slice_output_dir),
+        'slice_dir': str(slice_dir),
+        'slice_summary_json': str(slice_summary_json),
+        'selection_summary_json': str(selected['selection_summary_json']),
+        'pairs_jsonl': str(selected['output_pairs_jsonl']),
+        'csv_path': str(export_result['csv_path']),
+        'dedup_dropped_csv': str(export_result['dedup_dropped_csv']),
+        'normalized_slices_dir': str(export_result['normalized_slices_dir']),
+        'token_counts_csv': str(export_result['token_counts_csv']),
+        'token_distribution_png': str(export_result['token_distribution_png']),
+        'split_manifest_json': str(export_result['split_manifest_json']),
+        'dedup_mode': params.dedup_mode,
+        'summary_json': str(export_result['summary_json']),
+    }
