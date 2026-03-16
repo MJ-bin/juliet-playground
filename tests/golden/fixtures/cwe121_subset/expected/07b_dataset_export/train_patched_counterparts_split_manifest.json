@@ -1,9 +1,6 @@
 {
   "counts": {
-    "dedup_dropped_pairs": 1,
-    "dedup_dropped_rows": 2,
     "pairs_total": 2,
-    "rows_total": 4,
     "test": 0,
     "train_val": 2
   },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +15,43 @@ from shared.dataset_sources import (
     load_tree_sitter_parsers,
     normalize_artifact_path,
 )
-from shared.jsonio import write_json
+from shared.jsonio import write_json, write_summary_json
+
+
+@dataclass(frozen=True)
+class DatasetExportRequest:
+    pairs: list[dict[str, Any]]
+    paired_signatures_dir: Path
+    slice_dir: Path
+    export_paths: DatasetExportPaths
+    dedup_mode: str
+    split_assignments_fn: Callable[[list[str]], dict[str, str]]
+    collect_defined_function_names_fn: Callable[
+        [Path, dict[str, object]], tuple[set[str], str | None]
+    ]
+    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]]
+    dataset_basename: str | None = None
+    prepare_target_fn: Callable[[Path, bool], None] | None = None
+    overwrite: bool = False
+
+
+@dataclass
+class ExportRuntime:
+    tokenizer: object
+    parsers: dict[str, object]
+    content_token_limit: int
+    count_code_tokens_fn: Callable[[object, str], int]
+    source_func_cache: dict[str, set[str]] = field(default_factory=dict)
+    source_parse_error_cache: dict[str, str] = field(default_factory=dict)
+    source_files_seen: set[str] = field(default_factory=set)
+    source_files_failed: set[str] = field(default_factory=set)
+
+
+@dataclass
+class ExportAccumulator:
+    surviving_pairs: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    filtered_pair_reasons: Counter[str] = field(default_factory=Counter)
+    counts: Counter[str] = field(default_factory=Counter)
 
 
 def _prepare_export_outputs(*, export_paths: DatasetExportPaths) -> None:
@@ -22,95 +59,28 @@ def _prepare_export_outputs(*, export_paths: DatasetExportPaths) -> None:
     export_paths.normalized_slices_dir.mkdir(parents=True, exist_ok=True)
 
 
-def run_step07_export_wrapper(
-    *,
-    pairs: list[dict[str, Any]],
-    paired_signatures_dir: Path,
-    slice_dir: Path,
-    export_paths: DatasetExportPaths,
-    dedup_mode: str,
-    split_assignments_fn: Callable[[list[str]], dict[str, str]],
-    summary_metadata: dict[str, Any],
-    split_manifest_metadata: dict[str, Any],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-    run_step07_export_core_fn: Callable[..., dict[str, Any]] | None = None,
-    prepare_target_fn: Callable[[Path, bool], None] | None = None,
-    overwrite: bool = False,
-) -> dict[str, Any]:
-    if not paired_signatures_dir.exists():
-        raise FileNotFoundError(f'Paired signatures dir not found: {paired_signatures_dir}')
-    if not slice_dir.exists():
-        raise FileNotFoundError(f'Slice dir not found: {slice_dir}')
-    if dedup_mode not in {'none', 'row'}:
-        raise ValueError(f'Unsupported dedup_mode: {dedup_mode}')
+def run_configured_step07_export(request: DatasetExportRequest) -> dict[str, Any]:
+    if not request.paired_signatures_dir.exists():
+        raise FileNotFoundError(f'Paired signatures dir not found: {request.paired_signatures_dir}')
+    if not request.slice_dir.exists():
+        raise FileNotFoundError(f'Slice dir not found: {request.slice_dir}')
+    if request.dedup_mode not in {'none', 'row'}:
+        raise ValueError(f'Unsupported dedup_mode: {request.dedup_mode}')
 
-    export_paths.output_dir.mkdir(parents=True, exist_ok=True)
-    if prepare_target_fn is not None:
+    request.export_paths.output_dir.mkdir(parents=True, exist_ok=True)
+    if request.prepare_target_fn is not None:
         for target in (
-            export_paths.csv_path,
-            export_paths.dedup_dropped_csv,
-            export_paths.normalized_slices_dir,
-            export_paths.token_counts_csv,
-            export_paths.token_distribution_png,
-            export_paths.split_manifest_json,
-            export_paths.summary_json,
+            request.export_paths.csv_path,
+            request.export_paths.dedup_dropped_csv,
+            request.export_paths.normalized_slices_dir,
+            request.export_paths.token_counts_csv,
+            request.export_paths.token_distribution_png,
+            request.export_paths.split_manifest_json,
+            request.export_paths.summary_json,
         ):
-            prepare_target_fn(target, overwrite)
+            request.prepare_target_fn(target, request.overwrite)
 
-    if run_step07_export_core_fn is None:
-        run_step07_export_core_fn = run_step07_export_core
-
-    return run_step07_export_core_fn(
-        pairs=pairs,
-        paired_signatures_dir=paired_signatures_dir,
-        slice_dir=slice_dir,
-        export_paths=export_paths,
-        dedup_mode=dedup_mode,
-        split_assignments_fn=split_assignments_fn,
-        summary_metadata=summary_metadata,
-        split_manifest_metadata=split_manifest_metadata,
-        collect_defined_function_names_fn=collect_defined_function_names_fn,
-        build_source_file_candidates_fn=build_source_file_candidates_fn,
-    )
-
-
-def run_configured_step07_export(
-    *,
-    pairs: list[dict[str, Any]],
-    paired_signatures_dir: Path,
-    slice_dir: Path,
-    export_paths: DatasetExportPaths,
-    dedup_mode: str,
-    split_assignments_fn: Callable[[list[str]], dict[str, str]],
-    summary_metadata: dict[str, Any],
-    split_manifest_metadata: dict[str, Any],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-    run_step07_export_core_fn: Callable[..., dict[str, Any]],
-    prepare_target_fn: Callable[[Path, bool], None] | None = None,
-    overwrite: bool = False,
-) -> tuple[dict[str, Any], DatasetExportPaths]:
-    export_result = run_step07_export_wrapper(
-        pairs=pairs,
-        paired_signatures_dir=paired_signatures_dir,
-        slice_dir=slice_dir,
-        export_paths=export_paths,
-        dedup_mode=dedup_mode,
-        split_assignments_fn=split_assignments_fn,
-        summary_metadata=summary_metadata,
-        split_manifest_metadata=split_manifest_metadata,
-        collect_defined_function_names_fn=collect_defined_function_names_fn,
-        build_source_file_candidates_fn=build_source_file_candidates_fn,
-        run_step07_export_core_fn=run_step07_export_core_fn,
-        prepare_target_fn=prepare_target_fn,
-        overwrite=overwrite,
-    )
-    return export_result, export_paths
+    return run_step07_export_core(request)
 
 
 def _build_role_specs(pair: dict[str, Any]) -> list[dict[str, Any]]:
@@ -141,31 +111,27 @@ def _load_signature_payload(signature_path: Path) -> dict[str, Any]:
 def _collect_user_defined_function_names(
     *,
     source_candidates: list[Path],
-    parsers: dict[str, object],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    source_func_cache: dict[str, set[str]],
-    source_parse_error_cache: dict[str, str],
-    source_files_seen: set[str],
-    source_files_failed: set[str],
+    request: DatasetExportRequest,
+    runtime: ExportRuntime,
 ) -> set[str]:
     user_defined_function_names: set[str] = set()
     for source_path in source_candidates:
         source_key = str(source_path)
         if source_path.exists():
-            source_files_seen.add(source_key)
-        if source_key not in source_func_cache:
+            runtime.source_files_seen.add(source_key)
+        if source_key not in runtime.source_func_cache:
             if source_path.exists():
-                names, error = collect_defined_function_names_fn(source_path, parsers)
+                names, error = request.collect_defined_function_names_fn(
+                    source_path, runtime.parsers
+                )
             else:
                 names, error = set(), 'missing_source_file'
-            source_func_cache[source_key] = names
+            runtime.source_func_cache[source_key] = names
             if error is not None:
-                source_parse_error_cache[source_key] = error
+                runtime.source_parse_error_cache[source_key] = error
                 if source_path.exists():
-                    source_files_failed.add(source_key)
-        user_defined_function_names.update(source_func_cache[source_key])
+                    runtime.source_files_failed.add(source_key)
+        user_defined_function_names.update(runtime.source_func_cache[source_key])
     return user_defined_function_names
 
 
@@ -174,20 +140,8 @@ def _build_pair_role_record(
     pair_id: str,
     testcase_key: str,
     role: dict[str, Any],
-    slice_dir: Path,
-    tokenizer: object,
-    content_token_limit: int,
-    count_code_tokens: Callable[[object, str], int],
-    parsers: dict[str, object],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-    source_func_cache: dict[str, set[str]],
-    source_parse_error_cache: dict[str, str],
-    source_files_seen: set[str],
-    source_files_failed: set[str],
-    counts: Counter,
+    request: DatasetExportRequest,
+    runtime: ExportRuntime,
 ) -> tuple[dict[str, Any] | None, str | None]:
     role_name = str(role['role_name'])
     if not role_name:
@@ -201,41 +155,29 @@ def _build_pair_role_record(
     if not signature_path.exists():
         return None, 'missing_signature_file'
 
-    slice_path = find_slice_path(slice_dir, testcase_key, role_name)
+    slice_path = find_slice_path(request.slice_dir, testcase_key, role_name)
     if slice_path is None:
         return None, 'missing_slice_file'
 
     signature_payload = _load_signature_payload(signature_path)
     primary_file_hint = role['signature_info'].get('primary_file')
-    source_candidates = build_source_file_candidates_fn(signature_payload, primary_file_hint)
+    source_candidates = request.build_source_file_candidates_fn(
+        signature_payload, primary_file_hint
+    )
     user_defined_function_names = _collect_user_defined_function_names(
         source_candidates=source_candidates,
-        parsers=parsers,
-        collect_defined_function_names_fn=collect_defined_function_names_fn,
-        source_func_cache=source_func_cache,
-        source_parse_error_cache=source_parse_error_cache,
-        source_files_seen=source_files_seen,
-        source_files_failed=source_files_failed,
+        request=request,
+        runtime=runtime,
     )
 
     original_code = slice_path.read_text(encoding='utf-8', errors='replace')
-    normalized_code, _, replacement_count = normalize_slice_function_names(
+    normalized_code, _, _ = normalize_slice_function_names(
         original_code,
         user_defined_function_names,
     )
-    token_count = count_code_tokens(tokenizer, normalized_code)
-    exceeds_limit = token_count > content_token_limit
-    input_token_count = min(token_count, content_token_limit) + 2
-
-    counts['slices_total'] += 1
-    counts[f'ext_{slice_path.suffix.lower()}'] += 1
-    if replacement_count > 0:
-        counts['slices_normalized'] += 1
-        counts['functions_normalized_total'] += replacement_count
-    else:
-        counts['slices_unchanged'] += 1
-    if exceeds_limit:
-        counts['slices_over_limit'] += 1
+    token_count = runtime.count_code_tokens_fn(runtime.tokenizer, normalized_code)
+    exceeds_limit = token_count > runtime.content_token_limit
+    input_token_count = min(token_count, runtime.content_token_limit) + 2
 
     return {
         'pair_id': pair_id,
@@ -264,85 +206,41 @@ def _validate_pair_records(pair_records: list[dict[str, Any]]) -> str | None:
 
 
 def _collect_surviving_pairs(
-    *,
-    pairs: list[dict[str, Any]],
-    slice_dir: Path,
-    tokenizer: object,
-    content_token_limit: int,
-    count_code_tokens: Callable[[object, str], int],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-) -> tuple[
-    dict[str, list[dict[str, Any]]],
-    Counter,
-    Counter,
-    dict[str, str],
-    set[str],
-    set[str],
-]:
-    parsers = load_tree_sitter_parsers()
-    source_func_cache: dict[str, set[str]] = {}
-    source_parse_error_cache: dict[str, str] = {}
-    source_files_seen: set[str] = set()
-    source_files_failed: set[str] = set()
+    request: DatasetExportRequest,
+    runtime: ExportRuntime,
+) -> ExportAccumulator:
+    accumulator = ExportAccumulator(counts=Counter({'pairs_total': len(request.pairs)}))
 
-    surviving_pairs: dict[str, list[dict[str, Any]]] = {}
-    filtered_pair_reasons = Counter()
-    counts = Counter()
-    counts['pairs_total'] = len(pairs)
-
-    for pair in pairs:
+    for pair in request.pairs:
         pair_id = str(pair['pair_id'])
         testcase_key = str(pair['testcase_key'])
         roles = _build_role_specs(pair)
 
         pair_records: list[dict[str, Any]] = []
         pair_invalid_reason: str | None = None
-
         for role in roles:
             record, pair_invalid_reason = _build_pair_role_record(
                 pair_id=pair_id,
                 testcase_key=testcase_key,
                 role=role,
-                slice_dir=slice_dir,
-                tokenizer=tokenizer,
-                content_token_limit=content_token_limit,
-                count_code_tokens=count_code_tokens,
-                parsers=parsers,
-                collect_defined_function_names_fn=collect_defined_function_names_fn,
-                build_source_file_candidates_fn=build_source_file_candidates_fn,
-                source_func_cache=source_func_cache,
-                source_parse_error_cache=source_parse_error_cache,
-                source_files_seen=source_files_seen,
-                source_files_failed=source_files_failed,
-                counts=counts,
+                request=request,
+                runtime=runtime,
             )
             if pair_invalid_reason is not None:
                 break
             assert record is not None
             pair_records.append(record)
 
+        if pair_invalid_reason is None:
+            pair_invalid_reason = _validate_pair_records(pair_records)
+
         if pair_invalid_reason is not None:
-            filtered_pair_reasons[pair_invalid_reason] += 1
+            accumulator.filtered_pair_reasons[pair_invalid_reason] += 1
             continue
 
-        pair_invalid_reason = _validate_pair_records(pair_records)
-        if pair_invalid_reason is not None:
-            filtered_pair_reasons[pair_invalid_reason] += 1
-            continue
+        accumulator.surviving_pairs[pair_id] = pair_records
 
-        surviving_pairs[pair_id] = pair_records
-
-    return (
-        surviving_pairs,
-        filtered_pair_reasons,
-        counts,
-        source_parse_error_cache,
-        source_files_seen,
-        source_files_failed,
-    )
+    return accumulator
 
 
 def _write_token_counts_csv(token_count_rows: list[dict[str, Any]], token_counts_csv: Path) -> None:
@@ -498,68 +396,23 @@ def _write_dedup_audit_csv(dedup_audit_rows: list[dict[str, Any]], dedup_dropped
     )
 
 
-def _collect_and_filter_pairs(
-    *,
-    pairs: list[dict[str, Any]],
-    slice_dir: Path,
-    tokenizer: object,
-    content_token_limit: int,
-    count_code_tokens: Callable[[object, str], int],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-) -> tuple[
-    dict[str, list[dict[str, Any]]],
-    Counter,
-    Counter,
-    dict[str, str],
-    set[str],
-    set[str],
-]:
-    return _collect_surviving_pairs(
-        pairs=pairs,
-        slice_dir=slice_dir,
-        tokenizer=tokenizer,
-        content_token_limit=content_token_limit,
-        count_code_tokens=count_code_tokens,
-        collect_defined_function_names_fn=collect_defined_function_names_fn,
-        build_source_file_candidates_fn=build_source_file_candidates_fn,
-    )
-
-
 def _apply_dedup(
+    accumulator: ExportAccumulator,
     *,
-    surviving_pairs: dict[str, list[dict[str, Any]]],
-    filtered_pair_reasons: Counter,
     dedup_mode: str,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[dict[str, Any]], int, int]:
-    surviving_pairs, dedup_summary, dedup_audit_rows = dedupe_pairs_by_normalized_rows(
-        surviving_pairs=surviving_pairs,
-        filtered_pair_reasons=filtered_pair_reasons,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[dict[str, Any]]]:
+    return dedupe_pairs_by_normalized_rows(
+        surviving_pairs=accumulator.surviving_pairs,
+        filtered_pair_reasons=accumulator.filtered_pair_reasons,
         dedup_mode=dedup_mode,
-    )
-    dedup_dropped_pairs = len({str(row['pair_id']) for row in dedup_audit_rows})
-    dedup_dropped_rows = len(dedup_audit_rows)
-    return (
-        surviving_pairs,
-        dedup_summary,
-        dedup_audit_rows,
-        dedup_dropped_pairs,
-        dedup_dropped_rows,
     )
 
 
 def _write_export_artifacts(
     *,
+    request: DatasetExportRequest,
     surviving_pairs: dict[str, list[dict[str, Any]]],
-    split_assignments_fn: Callable[[list[str]], dict[str, str]],
-    csv_path: Path,
-    normalized_slices_dir: Path,
-    token_counts_csv: Path,
-    token_distribution_png: Path,
     dedup_audit_rows: list[dict[str, Any]],
-    dedup_dropped_csv: Path,
     plot_distribution_fn: Callable[[list[dict[str, Any]], Path], None],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
     token_count_rows = sorted(
@@ -570,18 +423,15 @@ def _write_export_artifacts(
             row['slice_filename'],
         ),
     )
-    _write_token_counts_csv(token_count_rows, token_counts_csv)
-    plot_distribution_fn(token_count_rows, token_distribution_png)
+    _write_token_counts_csv(token_count_rows, request.export_paths.token_counts_csv)
+    plot_distribution_fn(token_count_rows, request.export_paths.token_distribution_png)
 
-    split_assignments = split_assignments_fn(list(surviving_pairs.keys()))
-    ordered_rows, pair_ids_by_dataset_type = _build_ordered_rows(
-        surviving_pairs,
-        split_assignments,
-    )
+    split_assignments = request.split_assignments_fn(list(surviving_pairs.keys()))
+    ordered_rows, pair_ids_by_dataset_type = _build_ordered_rows(surviving_pairs, split_assignments)
     kept_unique_id_by_pair_role = _write_dataset_csv_and_slices(
         ordered_rows,
-        csv_path,
-        normalized_slices_dir,
+        request.export_paths.csv_path,
+        request.export_paths.normalized_slices_dir,
     )
 
     for audit_row in dedup_audit_rows:
@@ -592,42 +442,20 @@ def _write_export_artifacts(
                 kept_unique_id_by_pair_role.get((matched_pair_id, matched_role), '')
             )
 
-    _write_dedup_audit_csv(dedup_audit_rows, dedup_dropped_csv)
+    _write_dedup_audit_csv(dedup_audit_rows, request.export_paths.dedup_dropped_csv)
     return token_count_rows, ordered_rows, pair_ids_by_dataset_type
 
 
-def _build_export_summary(
-    *,
-    summary_metadata: dict[str, Any],
-    split_manifest_metadata: dict[str, Any],
-    normalized_slices_dir: Path,
-    dedup_dropped_csv: Path,
-    split_manifest_json: Path,
-    token_counts_csv: Path,
-    token_distribution_png: Path,
-    dedup_summary: dict[str, Any],
-    filtered_pair_reasons: Counter,
-    counts: Counter,
-    source_parse_error_cache: dict[str, str],
-    source_files_seen: set[str],
-    source_files_failed: set[str],
-    surviving_pairs: dict[str, list[dict[str, Any]]],
+def _build_split_manifest(
     pair_ids_by_dataset_type: dict[str, list[str]],
-    ordered_rows: list[dict[str, Any]],
-    token_count_rows: list[dict[str, Any]],
-    dedup_dropped_pairs: int,
-    dedup_dropped_rows: int,
-    max_length: int,
-    content_token_limit: int,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    split_manifest = {
+    *,
+    surviving_pairs_total: int,
+) -> dict[str, Any]:
+    return {
         'counts': {
-            'pairs_total': len(surviving_pairs),
+            'pairs_total': surviving_pairs_total,
             'train_val': len(pair_ids_by_dataset_type.get('train_val', [])),
             'test': len(pair_ids_by_dataset_type.get('test', [])),
-            'rows_total': len(ordered_rows),
-            'dedup_dropped_pairs': dedup_dropped_pairs,
-            'dedup_dropped_rows': dedup_dropped_rows,
         },
         'pair_ids': {
             'train_val': pair_ids_by_dataset_type.get('train_val', []),
@@ -635,27 +463,26 @@ def _build_export_summary(
         },
     }
 
+
+def _build_summary_payload(
+    *,
+    request: DatasetExportRequest,
+    runtime: ExportRuntime,
+    accumulator: ExportAccumulator,
+    dedup_summary: dict[str, Any],
+    surviving_pairs: dict[str, list[dict[str, Any]]],
+    pair_ids_by_dataset_type: dict[str, list[str]],
+    ordered_rows: list[dict[str, Any]],
+    token_count_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     token_values = [int(row['code_token_count']) for row in token_count_rows]
     mean_value = (sum(token_values) / len(token_values)) if token_values else 0.0
     sorted_values = sorted(token_values)
     median_value = sorted_values[len(sorted_values) // 2] if sorted_values else 0
 
-    counts['pairs_survived'] = len(surviving_pairs)
-    counts['pairs_filtered_out'] = sum(filtered_pair_reasons.values())
-    counts['rows_written'] = len(ordered_rows)
-    counts['dedup_dropped_pairs'] = dedup_dropped_pairs
-    counts['dedup_dropped_rows'] = dedup_dropped_rows
-    counts['source_files_total'] = len(source_files_seen)
-    counts['source_files_parse_failed'] = len(source_files_failed)
-    counts['train_val_pairs'] = len(pair_ids_by_dataset_type.get('train_val', []))
-    counts['test_pairs'] = len(pair_ids_by_dataset_type.get('test', []))
-    counts['train_val_rows'] = sum(1 for row in ordered_rows if row['dataset_type'] == 'train_val')
-    counts['test_rows'] = sum(1 for row in ordered_rows if row['dataset_type'] == 'test')
-
     summary_payload: dict[str, Any] = {}
-    dataset_basename = summary_metadata.get('dataset_basename')
-    if dataset_basename is not None:
-        summary_payload['dataset_basename'] = dataset_basename
+    if request.dataset_basename is not None:
+        summary_payload['dataset_basename'] = request.dataset_basename
     summary_payload.update(
         {
             'dedup': dedup_summary,
@@ -663,112 +490,72 @@ def _build_export_summary(
                 'total': len(token_values),
                 'mean': round(mean_value, 6),
                 'median': median_value,
-                'over_limit_count': sum(1 for value in token_values if value > content_token_limit),
+                'over_limit_count': sum(
+                    1 for value in token_values if value > runtime.content_token_limit
+                ),
             },
-            'filtered_pair_reasons': dict(filtered_pair_reasons),
-            'counts': dict(counts),
+            'filtered_pair_reasons': dict(accumulator.filtered_pair_reasons),
+            'counts': {
+                'pairs_total': int(accumulator.counts['pairs_total']),
+                'pairs_survived': len(surviving_pairs),
+                'pairs_filtered_out': sum(accumulator.filtered_pair_reasons.values()),
+                'rows_written': len(ordered_rows),
+                'train_val_pairs': len(pair_ids_by_dataset_type.get('train_val', [])),
+                'test_pairs': len(pair_ids_by_dataset_type.get('test', [])),
+            },
         }
     )
-    return split_manifest, summary_payload
+    return summary_payload
 
 
-def run_step07_export_core(
-    *,
-    pairs: list[dict[str, Any]],
-    paired_signatures_dir: Path,
-    slice_dir: Path,
-    export_paths: DatasetExportPaths,
-    dedup_mode: str,
-    split_assignments_fn: Callable[[list[str]], dict[str, str]],
-    summary_metadata: dict[str, Any],
-    split_manifest_metadata: dict[str, Any],
-    collect_defined_function_names_fn: Callable[
-        [Path, dict[str, object]], tuple[set[str], str | None]
-    ],
-    build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
-) -> dict[str, Any]:
+def run_step07_export_core(request: DatasetExportRequest) -> dict[str, Any]:
     from shared.slice_tokenizer import (
         CONTENT_TOKEN_LIMIT,
-        MAX_LENGTH,
         count_code_tokens,
         load_tokenizer,
         plot_distribution,
     )
 
-    _prepare_export_outputs(export_paths=export_paths)
+    _prepare_export_outputs(export_paths=request.export_paths)
 
     print('Loading tokenizer for normalized slices...')
-    tokenizer = load_tokenizer('microsoft/codebert-base')
-
-    (
-        surviving_pairs,
-        filtered_pair_reasons,
-        counts,
-        source_parse_error_cache,
-        source_files_seen,
-        source_files_failed,
-    ) = _collect_and_filter_pairs(
-        pairs=pairs,
-        slice_dir=slice_dir,
-        tokenizer=tokenizer,
+    runtime = ExportRuntime(
+        tokenizer=load_tokenizer('microsoft/codebert-base'),
+        parsers=load_tree_sitter_parsers(),
         content_token_limit=CONTENT_TOKEN_LIMIT,
-        count_code_tokens=count_code_tokens,
-        collect_defined_function_names_fn=collect_defined_function_names_fn,
-        build_source_file_candidates_fn=build_source_file_candidates_fn,
+        count_code_tokens_fn=count_code_tokens,
     )
 
-    (
-        surviving_pairs,
-        dedup_summary,
-        dedup_audit_rows,
-        dedup_dropped_pairs,
-        dedup_dropped_rows,
-    ) = _apply_dedup(
-        surviving_pairs=surviving_pairs,
-        filtered_pair_reasons=filtered_pair_reasons,
-        dedup_mode=dedup_mode,
+    accumulator = _collect_surviving_pairs(request, runtime)
+    surviving_pairs, dedup_summary, dedup_audit_rows = _apply_dedup(
+        accumulator,
+        dedup_mode=request.dedup_mode,
     )
-
     token_count_rows, ordered_rows, pair_ids_by_dataset_type = _write_export_artifacts(
+        request=request,
         surviving_pairs=surviving_pairs,
-        split_assignments_fn=split_assignments_fn,
-        csv_path=export_paths.csv_path,
-        normalized_slices_dir=export_paths.normalized_slices_dir,
-        token_counts_csv=export_paths.token_counts_csv,
-        token_distribution_png=export_paths.token_distribution_png,
         dedup_audit_rows=dedup_audit_rows,
-        dedup_dropped_csv=export_paths.dedup_dropped_csv,
         plot_distribution_fn=plot_distribution,
     )
 
-    split_manifest, summary_payload = _build_export_summary(
-        summary_metadata=summary_metadata,
-        split_manifest_metadata=split_manifest_metadata,
-        normalized_slices_dir=export_paths.normalized_slices_dir,
-        dedup_dropped_csv=export_paths.dedup_dropped_csv,
-        split_manifest_json=export_paths.split_manifest_json,
-        token_counts_csv=export_paths.token_counts_csv,
-        token_distribution_png=export_paths.token_distribution_png,
+    split_manifest = _build_split_manifest(
+        pair_ids_by_dataset_type,
+        surviving_pairs_total=len(surviving_pairs),
+    )
+    summary_payload = _build_summary_payload(
+        request=request,
+        runtime=runtime,
+        accumulator=accumulator,
         dedup_summary=dedup_summary,
-        filtered_pair_reasons=filtered_pair_reasons,
-        counts=counts,
-        source_parse_error_cache=source_parse_error_cache,
-        source_files_seen=source_files_seen,
-        source_files_failed=source_files_failed,
         surviving_pairs=surviving_pairs,
         pair_ids_by_dataset_type=pair_ids_by_dataset_type,
         ordered_rows=ordered_rows,
         token_count_rows=token_count_rows,
-        dedup_dropped_pairs=dedup_dropped_pairs,
-        dedup_dropped_rows=dedup_dropped_rows,
-        max_length=MAX_LENGTH,
-        content_token_limit=CONTENT_TOKEN_LIMIT,
     )
-    write_json(export_paths.split_manifest_json, split_manifest)
-    write_json(export_paths.summary_json, summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False))
 
+    write_json(request.export_paths.split_manifest_json, split_manifest)
+    write_summary_json(request.export_paths.summary_json, summary_payload)
     return {
-        'dataset': export_paths.to_payload(),
-        'counts': dict(counts),
+        'dataset': request.export_paths.to_payload(),
+        'counts': dict(summary_payload['counts']),
     }

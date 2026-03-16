@@ -17,9 +17,9 @@ from shared.artifact_layout import (
     build_patched_pairing_paths,
     build_slice_stage_paths,
 )
-from shared.dataset_export_core import run_configured_step07_export, run_step07_export_core
+from shared.dataset_export_core import DatasetExportRequest, run_configured_step07_export
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
-from shared.jsonio import load_jsonl, write_json, write_jsonl
+from shared.jsonio import load_jsonl, write_json, write_jsonl, write_summary_json
 from shared.pairing import (
     build_pairing_meta,
     build_signature_meta,
@@ -266,8 +266,7 @@ def build_train_patched_counterparts(*, run_dir: Path) -> PatchedPairingSelectio
         'train_val_pair_ids_total': len(train_val_pair_ids),
         'selected_testcases': len(selected_pairs),
     }
-    write_json(paths.pairing.selection_summary_json, summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False))
+    write_summary_json(paths.pairing.selection_summary_json, summary_payload)
     return PatchedPairingSelectionResult(
         pairs=selected_pairs,
         pairing=paths.pairing,
@@ -284,17 +283,17 @@ def export_dataset(
     dedup_mode: str,
 ) -> DatasetExportPaths:
     run_configured_step07_export(
-        pairs=pairs,
-        paired_signatures_dir=paired_signatures_dir,
-        slice_dir=slice_dir,
-        export_paths=dataset_paths,
-        dedup_mode=dedup_mode,
-        split_assignments_fn=lambda pair_ids: {pair_id: 'train_val' for pair_id in pair_ids},
-        summary_metadata={'dataset_basename': DATASET_BASENAME},
-        split_manifest_metadata={},
-        collect_defined_function_names_fn=collect_defined_function_names,
-        build_source_file_candidates_fn=build_source_file_candidates,
-        run_step07_export_core_fn=run_step07_export_core,
+        DatasetExportRequest(
+            pairs=pairs,
+            paired_signatures_dir=paired_signatures_dir,
+            slice_dir=slice_dir,
+            export_paths=dataset_paths,
+            dedup_mode=dedup_mode,
+            split_assignments_fn=lambda pair_ids: {pair_id: 'train_val' for pair_id in pair_ids},
+            collect_defined_function_names_fn=collect_defined_function_names,
+            build_source_file_candidates_fn=build_source_file_candidates,
+            dataset_basename=DATASET_BASENAME,
+        )
     )
     return dataset_paths
 
@@ -308,7 +307,7 @@ def export_patched_dataset(params: PatchedDatasetExportParams) -> PatchedDataset
         output_dir=paths.slices.output_dir,
         overwrite=False,
         run_dir=paths.run_dir,
-        summary_metadata={'dataset_basename': DATASET_BASENAME},
+        dataset_basename=DATASET_BASENAME,
     )
 
     dataset_paths = export_dataset(

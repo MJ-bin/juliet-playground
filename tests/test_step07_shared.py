@@ -24,14 +24,14 @@ def test_primary_dataset_export_uses_shared_step07_core(tmp_path, monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_core(**kwargs):
-        captured.update(kwargs)
+    def fake_run_configured(request):
+        captured['request'] = request
         return {
-            'dataset': kwargs['export_paths'].to_payload(),
+            'dataset': request.export_paths.to_payload(),
             'counts': {},
         }
 
-    monkeypatch.setattr(module, 'run_step07_export_core', fake_core)
+    monkeypatch.setattr(module, 'run_configured_step07_export', fake_run_configured)
 
     result = module.export_dataset_from_pipeline(
         pairs_jsonl=pairs_jsonl,
@@ -44,11 +44,13 @@ def test_primary_dataset_export_uses_shared_step07_core(tmp_path, monkeypatch):
     )
 
     assert result['dataset']['csv_path'].endswith('Real_Vul_data.csv')
-    split_assignments = captured['split_assignments_fn'](['pair-a', 'pair-b'])
+    request = captured['request']
+    split_assignments = request.split_assignments_fn(['pair-a', 'pair-b'])
     assert split_assignments.keys() == {'pair-a', 'pair-b'}
     assert set(split_assignments.values()) == {'train_val', 'test'}
-    assert captured['summary_metadata'] == {}
-    assert captured['split_manifest_metadata'] == {}
+    assert request.dataset_basename is None
+    assert request.paired_signatures_dir == paired_signatures_dir
+    assert request.slice_dir == slice_dir
 
 
 def test_patched_counterparts_uses_shared_step07_core(tmp_path, monkeypatch):
@@ -68,14 +70,14 @@ def test_patched_counterparts_uses_shared_step07_core(tmp_path, monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_core(**kwargs):
-        captured.update(kwargs)
+    def fake_run_configured(request):
+        captured['request'] = request
         return {
-            'dataset': kwargs['export_paths'].to_payload(),
+            'dataset': request.export_paths.to_payload(),
             'counts': {'pairs_total': 2},
         }
 
-    monkeypatch.setattr(module, 'run_step07_export_core', fake_core)
+    monkeypatch.setattr(module, 'run_configured_step07_export', fake_run_configured)
 
     dataset_paths = module.build_dataset_export_paths(tmp_path / 'out', module.DATASET_BASENAME)
     result = module.export_dataset(
@@ -87,9 +89,9 @@ def test_patched_counterparts_uses_shared_step07_core(tmp_path, monkeypatch):
     )
 
     assert result.csv_path.name == 'train_patched_counterparts.csv'
-    assert captured['split_assignments_fn'](['pair-a', 'pair-b']) == {
+    request = captured['request']
+    assert request.split_assignments_fn(['pair-a', 'pair-b']) == {
         'pair-a': 'train_val',
         'pair-b': 'train_val',
     }
-    assert captured['summary_metadata']['dataset_basename'] == 'train_patched_counterparts'
-    assert captured['split_manifest_metadata'] == {}
+    assert request.dataset_basename == 'train_patched_counterparts'

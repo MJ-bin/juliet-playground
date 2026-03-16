@@ -292,9 +292,7 @@ def test_export_patched_dataset_runs_selection_slice_and_export(tmp_path, monkey
     assert captured['slice_args']['output_dir'] == (
         run_dir / '06_slices' / 'train_patched_counterparts'
     )
-    assert captured['slice_args']['summary_metadata'] == {
-        'dataset_basename': module.DATASET_BASENAME
-    }
+    assert captured['slice_args']['dataset_basename'] == module.DATASET_BASENAME
     assert (
         result.dataset.summary_json
         == dataset_export_dir / 'train_patched_counterparts_summary.json'

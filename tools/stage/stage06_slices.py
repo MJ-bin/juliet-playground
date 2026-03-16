@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.fs import prepare_output_dir
-from shared.jsonio import write_json
+from shared.jsonio import write_summary_json
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 from shared.traces import extract_std_bug_trace
@@ -210,7 +210,7 @@ def generate_slices(
     new_prefix: str | None = None,
     overwrite: bool = False,
     run_dir: Path | None = None,
-    summary_metadata: dict[str, Any] | None = None,
+    dataset_basename: str | None = None,
 ) -> dict[str, Any]:
     validate_args(signature_db_dir, old_prefix=old_prefix, new_prefix=new_prefix)
     prepare_output_dir(output_dir, overwrite)
@@ -232,11 +232,8 @@ def generate_slices(
         'new_prefix': new_prefix,
         **summary,
     }
-    if summary_metadata:
-        for key, value in summary_metadata.items():
-            if key not in summary_payload:
-                summary_payload[key] = value
+    if dataset_basename is not None:
+        summary_payload['dataset_basename'] = dataset_basename
     summary_path = output_dir / 'summary.json'
-    write_json(summary_path, summary_payload)
-    print(json.dumps(summary_payload, ensure_ascii=False))
+    write_summary_json(summary_path, summary_payload)
     return summary_payload

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.artifact_layout import DatasetExportPaths, build_dataset_export_paths
-from shared.dataset_export_core import run_configured_step07_export, run_step07_export_core
+from shared.dataset_export_core import DatasetExportRequest, run_configured_step07_export
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
 from shared.jsonio import load_jsonl as _load_jsonl
 
@@ -69,19 +69,18 @@ def export_primary_dataset(params: PrimaryDatasetExportParams) -> PrimaryDataset
     pairs = load_pairs_jsonl(params.pairs_jsonl)
     dataset_paths = build_dataset_export_paths(params.output_dir)
     run_configured_step07_export(
-        pairs=pairs,
-        paired_signatures_dir=params.paired_signatures_dir,
-        slice_dir=params.slice_dir,
-        export_paths=dataset_paths,
-        dedup_mode=params.dedup_mode,
-        split_assignments_fn=lambda pair_ids: compute_pair_split(
-            pair_ids, train_ratio=params.train_ratio, seed=params.split_seed
-        ),
-        summary_metadata={},
-        split_manifest_metadata={},
-        collect_defined_function_names_fn=collect_defined_function_names,
-        build_source_file_candidates_fn=build_source_file_candidates,
-        run_step07_export_core_fn=run_step07_export_core,
+        DatasetExportRequest(
+            pairs=pairs,
+            paired_signatures_dir=params.paired_signatures_dir,
+            slice_dir=params.slice_dir,
+            export_paths=dataset_paths,
+            dedup_mode=params.dedup_mode,
+            split_assignments_fn=lambda pair_ids: compute_pair_split(
+                pair_ids, train_ratio=params.train_ratio, seed=params.split_seed
+            ),
+            collect_defined_function_names_fn=collect_defined_function_names,
+            build_source_file_candidates_fn=build_source_file_candidates,
+        )
     )
     return PrimaryDatasetExportResult(dataset=dataset_paths)
 

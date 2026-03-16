@@ -27,19 +27,11 @@
     "dedup_duplicate_normalized_slice": 1
   },
   "counts": {
-    "dedup_dropped_pairs": 1,
-    "dedup_dropped_rows": 2,
-    "ext_.c": 6,
     "pairs_filtered_out": 1,
     "pairs_survived": 2,
     "pairs_total": 3,
     "rows_written": 4,
-    "slices_total": 6,
-    "slices_unchanged": 6,
-    "source_files_parse_failed": 0,
     "test_pairs": 0,
-    "test_rows": 0,
-    "train_val_pairs": 2,
-    "train_val_rows": 4
+    "train_val_pairs": 2
   }
 }

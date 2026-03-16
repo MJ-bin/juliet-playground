@@ -26,22 +26,11 @@
     "dedup_duplicate_normalized_slice": 2
   },
   "counts": {
-    "dedup_dropped_pairs": 2,
-    "dedup_dropped_rows": 4,
-    "ext_.c": 8,
-    "ext_.cpp": 2,
-    "functions_normalized_total": 2,
     "pairs_filtered_out": 2,
     "pairs_survived": 3,
     "pairs_total": 5,
     "rows_written": 6,
-    "slices_normalized": 2,
-    "slices_total": 10,
-    "slices_unchanged": 8,
-    "source_files_parse_failed": 0,
     "test_pairs": 1,
-    "test_rows": 2,
-    "train_val_pairs": 2,
-    "train_val_rows": 4
+    "train_val_pairs": 2
   }
 }
