@@ -13,6 +13,14 @@
 - 테스트에서 꼭 확인해야 하는 **필수 필드 / 태그 / 파일**
 - golden diff로 볼 수는 있지만 **핵심 계약으로 보기 어려운 항목**
 
+
+> **2026-03 compact contract note**
+> 
+> 현재 코드 기준으로 `02a`, `02b`, `03`, `04`, `05`, `06`, `07`, `07b` 의 summary JSON 은
+> 기본적으로 `{"artifacts": {...}, "stats": {...}}` 형태의 **compact summary** 를 사용합니다.
+> 이전의 verbose summary key, selection summary, dedup/token auxiliary outputs 관련 설명과
+> 충돌하는 오래된 항목이 있다면 **현재 코드와 tests가 우선**입니다.
+
 ## 범위
 
 기준 구현:
