@@ -156,8 +156,18 @@ python tools/run_pipeline.py full 78 89
 # strict trace 결과에서 paired trace dataset만 생성
 python tools/run_pipeline.py stage05
 
-# 기존 run의 Step 07 + 07b 재생성
-python tools/run_pipeline.py rerun-step07 --run-dir artifacts/pipeline-runs/run-2026.03.10-00:49:21
+# 기존 run의 Step 07 재생성
+RUN_DIR=artifacts/pipeline-runs/run-2026.03.10-00:49:21
+python tools/run_pipeline.py stage07 \
+  --pairs-jsonl "$RUN_DIR/05_pair_trace_ds/pairs.jsonl" \
+  --paired-signatures-dir "$RUN_DIR/05_pair_trace_ds/paired_signatures" \
+  --slice-dir "$RUN_DIR/06_slices/slice" \
+  --output-dir "$RUN_DIR/07_dataset_export"
+
+# 기존 run의 Step 07b 재생성
+python tools/run_pipeline.py stage07b \
+  --run-dir "$RUN_DIR" \
+  --overwrite
 ```
 
 추가 명령 예시와 재실행 패턴은 [`docs/rerun.md`](docs/rerun.md)에 정리되어 있습니다.
@@ -172,4 +182,4 @@ python tools/run_pipeline.py rerun-step07 --run-dir artifacts/pipeline-runs/run-
 - `run_pipeline.py stage03 --global-result`를 쓰면 infer 결과 root가
   로컬 `artifacts/infer-results/` 대신 `/data/pattern/result/infer-results/`로 바뀝니다.
 - CodeBERT tokenizer 캐시, `--overwrite`, `--old-prefix/--new-prefix`,
-  `run_pipeline.py rerun-step07`의 suffix 규칙, 재현성 옵션은 [`docs/rerun.md`](docs/rerun.md)를 참고하세요.
+  stage별 재실행 패턴과 재현성 옵션은 [`docs/rerun.md`](docs/rerun.md)를 참고하세요.

@@ -408,12 +408,6 @@ def compare_dataset_export(before_dir: Path, after_dir: Path, reporter: Reporter
         after_dir / 'train_patched_counterparts_token_counts.csv',
         make_token_count_key,
     )
-    report_json_diff(
-        reporter,
-        'rerun_step07_metadata.json',
-        before_dir / 'rerun_step07_metadata.json',
-        after_dir / 'rerun_step07_metadata.json',
-    )
 
 
 def compare_pair_trace(before_dir: Path, after_dir: Path, reporter: Reporter) -> None:

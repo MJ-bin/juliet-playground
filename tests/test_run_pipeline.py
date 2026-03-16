@@ -284,32 +284,3 @@ def test_stage07b_subcommand_delegates(monkeypatch, tmp_path):
         tmp_path / 'pair' / 'train_patched_counterparts_selection_summary.json'
     )
     assert params.dedup_mode == 'none'
-
-
-def test_rerun_step07_subcommand_delegates(monkeypatch, tmp_path):
-    module = load_module_from_path('test_run_pipeline_rerun', REPO_ROOT / 'tools/run_pipeline.py')
-
-    captured: dict[str, object] = {}
-
-    def fake_run_rerun_step07(**kwargs):
-        captured.update(kwargs)
-        return {'output_dir': str(tmp_path / 'rerun-out')}
-
-    monkeypatch.setattr(module._rerun_step07, 'run_rerun_step07', fake_run_rerun_step07)
-
-    result = run_module_main(
-        module,
-        [
-            'rerun-step07',
-            '--run-dir',
-            str(tmp_path / 'run'),
-            '--dedup-mode',
-            'none',
-            '--only-07',
-        ],
-    )
-
-    assert result == 0
-    assert captured['run_dir'] == tmp_path / 'run'
-    assert captured['dedup_mode'] == 'none'
-    assert captured['only_07'] is True

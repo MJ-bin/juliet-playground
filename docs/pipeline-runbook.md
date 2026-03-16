@@ -15,8 +15,8 @@
 ## 주요 스크립트와 역할
 
 - `tools/run_pipeline.py`
-  - 전체 파이프라인, stage별 실행, `rerun-step07`를 한 곳에서 실행하는 기본 entrypoint
-  - 대표 subcommand: `full`, `stage03`, `stage03-signature`, `stage05`, `stage06`, `stage07`, `stage07b`, `rerun-step07`
+  - 전체 파이프라인과 stage별 실행을 한 곳에서 담당하는 기본 entrypoint
+  - 대표 subcommand: `full`, `stage03`, `stage03-signature`, `stage05`, `stage06`, `stage07`, `stage07b`
   - `tools/stage/stage03_infer.py`, `stage05_pair_trace.py`, `stage06_slices.py`, `stage07b_patched_export.py`는 standalone CLI가 아니라 이 entrypoint가 호출하는 내부 모듈입니다.
 
 ## 빠른 이동
@@ -28,7 +28,7 @@
 - 대표 명령 모음:
   [`rerun.md`](rerun.md) → `자주 쓰는 명령`
 - Step 07 / 07b 재실행:
-  [`rerun.md`](rerun.md) → ``run_pipeline.py rerun-step07` 동작 정리`
+  [`rerun.md`](rerun.md) → `Step 07 / 07b 직접 재실행 메모`
 - tokenizer / overwrite / path rewrite:
   [`rerun.md`](rerun.md) → `운영 메모`
 

@@ -8,7 +8,6 @@ from typing import Any
 
 from shared import dataset_dedup as _dataset_dedup
 from stage import pipeline as _pipeline
-from stage import rerun_step07 as _rerun_step07
 from stage import stage01_manifest as _stage01_manifest
 from stage import stage02a_taint as _stage02a_taint
 from stage import stage02b_flow as _stage02b_flow
@@ -38,9 +37,7 @@ def _print_result(result: Any) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description='Unified runner for pipeline full/stage/rerun commands.'
-    )
+    parser = argparse.ArgumentParser(description='Unified runner for pipeline full/stage commands.')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     full = subparsers.add_parser('full', help='Run the full pipeline.')
@@ -176,21 +173,6 @@ def parse_args() -> argparse.Namespace:
     stage07b.add_argument('--overwrite', action='store_true')
     stage07b.add_argument('--old-prefix', type=str, default=None)
     stage07b.add_argument('--new-prefix', type=str, default=None)
-
-    rerun = subparsers.add_parser('rerun-step07', help='Run rerun-step07 flow.')
-    rerun.add_argument('--run-dir', type=Path, default=None)
-    rerun.add_argument(
-        '--pipeline-root',
-        type=Path,
-        default=Path(_rerun_step07.RESULT_DIR) / 'pipeline-runs',
-    )
-    rerun.add_argument('--output-dir', type=Path, default=None)
-    rerun.add_argument('--dedup-mode', choices=['none', 'row'], default='row')
-    rerun.add_argument('--overwrite', action='store_true')
-    rerun.add_argument('--only-07', action='store_true')
-    rerun.add_argument('--only-07b', action='store_true')
-    rerun.add_argument('--old-prefix', type=str, default=None)
-    rerun.add_argument('--new-prefix', type=str, default=None)
 
     return parser.parse_args()
 
@@ -378,21 +360,6 @@ def main() -> int:
                     old_prefix=args.old_prefix,
                     new_prefix=args.new_prefix,
                 )
-            )
-        )
-
-    if args.command == 'rerun-step07':
-        return _print_result(
-            _rerun_step07.run_rerun_step07(
-                run_dir=args.run_dir,
-                pipeline_root=args.pipeline_root,
-                output_dir=args.output_dir,
-                dedup_mode=args.dedup_mode,
-                overwrite=args.overwrite,
-                only_07=args.only_07,
-                only_07b=args.only_07b,
-                old_prefix=args.old_prefix,
-                new_prefix=args.new_prefix,
             )
         )
 
