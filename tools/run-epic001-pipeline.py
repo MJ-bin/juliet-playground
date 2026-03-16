@@ -7,8 +7,8 @@ from typing import List, Optional
 import typer
 from shared import step07_dedup as _step07_dedup
 from shared.paths import PROJECT_HOME, PULSE_TAINT_CONFIG, RESULT_DIR
-from stage import dataset_export as _dataset_export
 from stage import pipeline as _pipeline_run
+from stage import stage07_dataset_export as _dataset_export
 
 PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams
 PrimaryDatasetExportResult = _dataset_export.PrimaryDatasetExportResult

@@ -21,7 +21,7 @@ from shared.paths import (
     RESULT_DIR,
 )
 
-from stage.signature import generate_signatures
+from stage.stage03_signature import generate_signatures
 
 TOTAL_CORES = os.cpu_count() or 4
 # Conservative memory-aware parallelization to prevent OOM

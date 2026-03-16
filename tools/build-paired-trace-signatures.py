@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from stage import pair_trace as _pair_trace
+from stage import stage05_pair_trace as _pair_trace
 
 COUNTERPART_FLOW_TYPES = _pair_trace.COUNTERPART_FLOW_TYPES
 StrictTraceRecord = _pair_trace.StrictTraceRecord

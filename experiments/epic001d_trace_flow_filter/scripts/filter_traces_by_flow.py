@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from stage import trace_flow as _trace_flow
+from stage import stage04_trace_flow as _trace_flow
 
 FlowPoint = _trace_flow.FlowPoint
 TARGET_TAGS = _trace_flow.TARGET_TAGS

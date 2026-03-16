@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 from shared.paths import RESULT_DIR
-from stage import signature as _signature_stage
+from stage import stage03_signature as _signature_stage
 
 find_latest_infer_run_dir = _signature_stage.find_latest_infer_run_dir
 resolve_infer_run_name = _signature_stage.resolve_infer_run_name

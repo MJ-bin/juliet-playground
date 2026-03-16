@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 from shared.juliet_keys import derive_testcase_key_from_file_name
-from stage.trace_flow import FlowPoint, TARGET_TAGS, load_flow_index
+from stage.stage04_trace_flow import FlowPoint, TARGET_TAGS, load_flow_index
 
 
 def load_trace_lines(trace_file: Path) -> set[tuple[str, int]]:

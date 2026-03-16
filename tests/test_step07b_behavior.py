@@ -11,7 +11,7 @@ from tests.helpers import REPO_ROOT, load_module_from_path, run_module_main, wri
 def test_build_train_patched_counterparts_tracks_selection_and_skip_reasons(tmp_path):
     module = load_module_from_path(
         'test_step07b_behavior_selection',
-        REPO_ROOT / 'tools/stage/patched_export.py',
+        REPO_ROOT / 'tools/stage/stage07b_patched_export.py',
     )
 
     pair_dir = tmp_path / 'run' / '05_pair_trace_ds'
@@ -121,7 +121,7 @@ def test_build_train_patched_counterparts_tracks_selection_and_skip_reasons(tmp_
 def test_build_train_patched_counterparts_requires_train_val_pairs(tmp_path):
     module = load_module_from_path(
         'test_step07b_behavior_requires_train',
-        REPO_ROOT / 'tools/stage/patched_export.py',
+        REPO_ROOT / 'tools/stage/stage07b_patched_export.py',
     )
 
     pair_dir = tmp_path / 'run' / '05_pair_trace_ds'
@@ -146,7 +146,7 @@ def test_build_train_patched_counterparts_requires_train_val_pairs(tmp_path):
 def test_export_patched_dataset_runs_selection_slice_and_export(tmp_path, monkeypatch):
     module = load_module_from_path(
         'test_step07b_behavior_export_api',
-        REPO_ROOT / 'tools/stage/patched_export.py',
+        REPO_ROOT / 'tools/stage/stage07b_patched_export.py',
     )
 
     run_dir = tmp_path / 'run'
@@ -217,7 +217,7 @@ def test_export_patched_dataset_runs_selection_slice_and_export(tmp_path, monkey
 def test_main_calls_export_patched_dataset(tmp_path, monkeypatch):
     module = load_module_from_path(
         'test_step07b_behavior_main',
-        REPO_ROOT / 'tools/stage/patched_export.py',
+        REPO_ROOT / 'tools/stage/stage07b_patched_export.py',
     )
 
     run_dir = tmp_path / 'run'

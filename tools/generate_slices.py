@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from stage import slices as _slices
+from stage import stage06_slices as _slices
 
 CPP_SUFFIXES = _slices.CPP_SUFFIXES
 build_slice = _slices.build_slice

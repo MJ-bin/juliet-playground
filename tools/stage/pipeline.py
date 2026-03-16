@@ -17,10 +17,10 @@ from typing import Callable, Dict, List, Optional
 import typer
 from shared.paths import PROJECT_HOME, PULSE_TAINT_CONFIG, RESULT_DIR
 
-from stage import dataset_export as _dataset_export
-from stage import pair_trace as _pair_trace
-from stage import slices as _slices
-from stage import trace_flow as _trace_flow
+from stage import stage04_trace_flow as _trace_flow
+from stage import stage05_pair_trace as _pair_trace
+from stage import stage06_slices as _slices
+from stage import stage07_dataset_export as _dataset_export
 
 PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams
 PrimaryDatasetExportResult = _dataset_export.PrimaryDatasetExportResult

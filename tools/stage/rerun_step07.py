@@ -12,8 +12,8 @@ from shared.jsonio import load_json
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 
-from stage import dataset_export as _dataset_export
-from stage import patched_export as _patched_export
+from stage import stage07_dataset_export as _dataset_export
+from stage import stage07b_patched_export as _patched_export
 
 prepare_target = _fs_utils.prepare_target
 PrimaryDatasetExportParams = _dataset_export.PrimaryDatasetExportParams

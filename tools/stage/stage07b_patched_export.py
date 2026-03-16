@@ -17,7 +17,7 @@ from shared.signatures import load_signature_payload
 from shared.step07_export_core import run_step07_export_core
 from shared.step07_sources import build_source_file_candidates, collect_defined_function_names
 
-from stage.slices import process_signature_db
+from stage.stage06_slices import process_signature_db
 
 DATASET_BASENAME = 'train_patched_counterparts'
 prepare_target = _fs_utils.prepare_target

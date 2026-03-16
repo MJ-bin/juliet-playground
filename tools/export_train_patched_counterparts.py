@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from stage import patched_export as _patched_counterparts
+from stage import stage07b_patched_export as _patched_counterparts
 
 PatchedDatasetExportParams = _patched_counterparts.PatchedDatasetExportParams
 PatchedDatasetExportResult = _patched_counterparts.PatchedDatasetExportResult

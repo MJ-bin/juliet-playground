@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import typer
 from shared.paths import PULSE_TAINT_CONFIG, RESULT_DIR
-from stage import infer as _infer_runner
+from stage import stage03_infer as _infer_runner
 
 build_infer_command = _infer_runner.build_infer_command
 find_all_cwe_dirs = _infer_runner.find_all_cwe_dirs
