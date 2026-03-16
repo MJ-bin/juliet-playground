@@ -225,7 +225,7 @@ def test_export_dataset_from_pipeline_filters_over_limit_pairs(tmp_path, monkeyp
         lambda *_args, **_kwargs: (set(), None),
     )
 
-    import tokenize_slices
+    from shared import slice_tokenizer
 
     class OverLimitTokenizer:
         def tokenize(self, code: str) -> list[str]:
@@ -233,9 +233,9 @@ def test_export_dataset_from_pipeline_filters_over_limit_pairs(tmp_path, monkeyp
                 return ['tok'] * 600
             return code.split()
 
-    monkeypatch.setattr(tokenize_slices, 'load_tokenizer', lambda _model_name: OverLimitTokenizer())
+    monkeypatch.setattr(slice_tokenizer, 'load_tokenizer', lambda _model_name: OverLimitTokenizer())
     monkeypatch.setattr(
-        tokenize_slices,
+        slice_tokenizer,
         'plot_distribution',
         lambda _rows, output_plot: Path(output_plot).write_bytes(b'STUB_PNG\n'),
     )

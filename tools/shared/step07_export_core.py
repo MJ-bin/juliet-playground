@@ -360,7 +360,7 @@ def run_step07_export_core(
     ],
     build_source_file_candidates_fn: Callable[[dict[str, Any], str | None], list[Path]],
 ) -> dict[str, Any]:
-    from tokenize_slices import (
+    from shared.slice_tokenizer import (
         CONTENT_TOKEN_LIMIT,
         MAX_LENGTH,
         count_code_tokens,
