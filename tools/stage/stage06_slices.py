@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.fs import prepare_output_dir
+from shared.jsonio import write_json
 from shared.paths import RESULT_DIR
 from shared.pipeline_runs import find_latest_pipeline_run_dir
 from shared.traces import extract_std_bug_trace
@@ -236,8 +237,6 @@ def generate_slices(
             if key not in summary_payload:
                 summary_payload[key] = value
     summary_path = output_dir / 'summary.json'
-    summary_path.write_text(
-        json.dumps(summary_payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-    )
+    write_json(summary_path, summary_payload)
     print(json.dumps(summary_payload, ensure_ascii=False))
     return summary_payload

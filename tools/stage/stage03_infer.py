@@ -1,7 +1,5 @@
 import concurrent.futures
-import csv
 import datetime
-import json
 import os
 import re
 import shlex
@@ -10,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Set, Tuple
 
+from shared.csvio import write_csv_rows
+from shared.jsonio import write_json
 from shared.paths import (
     GLOBAL_INFER_RESULTS_DIR,
     INFER_BIN,
@@ -292,21 +292,21 @@ def generate_result_csv(result_map: Dict[object, Dict[str, object]], result_dir:
     analysis_dir = os.path.join(result_dir, 'analysis')
     os.makedirs(analysis_dir, exist_ok=True)
     csv_path = os.path.join(analysis_dir, 'result.csv')
-    with open(csv_path, 'w') as csvfile:
-        writer = csv.writer(csvfile)
-
-        writer.writerow(['CWE NUMBER', 'ALL_TESTCASES', 'TIME(s)', 'ISSUE', 'NO ISSUE', 'ERROR'])
-
-        for cwe_number in result_map:
-            cwe_number_info = result_map[cwe_number]
-
-            elapsed_sec = cwe_number_info['time']
-            issue = cwe_number_info['issue']
-            no_issue = cwe_number_info['no_issue']
-            error = cwe_number_info['error']
-            total_cases = issue + no_issue + error
-
-            writer.writerow([cwe_number, total_cases, elapsed_sec, issue, no_issue, error])
+    write_csv_rows(
+        Path(csv_path),
+        ['CWE NUMBER', 'ALL_TESTCASES', 'TIME(s)', 'ISSUE', 'NO ISSUE', 'ERROR'],
+        (
+            [
+                cwe_number,
+                cwe_number_info['issue'] + cwe_number_info['no_issue'] + cwe_number_info['error'],
+                cwe_number_info['time'],
+                cwe_number_info['issue'],
+                cwe_number_info['no_issue'],
+                cwe_number_info['error'],
+            ]
+            for cwe_number, cwe_number_info in result_map.items()
+        ),
+    )
     return Path(csv_path)
 
 
@@ -425,9 +425,6 @@ def run_infer_and_signature(
 
     if summary_json is not None:
         summary_json = summary_json.resolve()
-        summary_json.parent.mkdir(parents=True, exist_ok=True)
-        summary_json.write_text(
-            json.dumps(summary_payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-        )
+        write_json(summary_json, summary_payload)
 
     return summary_payload

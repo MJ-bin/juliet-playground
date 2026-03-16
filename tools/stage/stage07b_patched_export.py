@@ -16,7 +16,7 @@ from shared.artifact_layout import (
 )
 from shared.dataset_export_core import run_step07_export_core, run_step07_export_wrapper
 from shared.dataset_sources import build_source_file_candidates, collect_defined_function_names
-from shared.jsonio import load_jsonl
+from shared.jsonio import load_jsonl, write_json, write_jsonl
 from shared.pairing import (
     build_pairing_meta,
     build_signature_meta,
@@ -301,13 +301,8 @@ def build_train_patched_counterparts(
             leftover_candidates_total=len(candidate_leftovers),
         )
 
-        b2b_output_path.write_text(
-            json.dumps(b2b_export, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-        )
-        counterpart_output_path.write_text(
-            json.dumps(counterpart_export, ensure_ascii=False, indent=2) + '\n',
-            encoding='utf-8',
-        )
+        write_json(b2b_output_path, b2b_export)
+        write_json(counterpart_output_path, counterpart_export)
 
         selected_pairs.append(
             {
@@ -345,9 +340,7 @@ def build_train_patched_counterparts(
         if len(candidate_leftovers) > 1:
             selection_counts['selected_pairs_with_extra_leftovers'] += 1
 
-    with output_pairs_jsonl.open('w', encoding='utf-8') as f:
-        for record in selected_pairs:
-            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    write_jsonl(output_pairs_jsonl, selected_pairs)
 
     summary_payload = {
         'dataset_basename': DATASET_BASENAME,
@@ -361,9 +354,7 @@ def build_train_patched_counterparts(
         'train_val_pair_ids_total': len(train_val_pair_ids),
         'selected_testcases': len(selected_pairs),
     }
-    summary_json.write_text(
-        json.dumps(summary_payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-    )
+    write_json(summary_json, summary_payload)
     print(json.dumps(summary_payload, ensure_ascii=False))
     return {
         'pairs': selected_pairs,

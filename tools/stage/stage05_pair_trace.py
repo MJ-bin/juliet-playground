@@ -8,6 +8,7 @@ from typing import Any
 
 from shared.artifact_layout import build_pair_trace_paths
 from shared.fs import prepare_output_dir
+from shared.jsonio import write_json, write_jsonl
 from shared.pairing import (
     build_pairing_meta,
     build_signature_meta,
@@ -240,14 +241,8 @@ def build_paired_trace_dataset(
             bug_trace_length=counterpart_record.bug_trace_length,
         )
 
-        b2b_output_path.write_text(
-            json.dumps(b2b_export, ensure_ascii=False, indent=2) + '\n',
-            encoding='utf-8',
-        )
-        counterpart_output_path.write_text(
-            json.dumps(counterpart_export, ensure_ascii=False, indent=2) + '\n',
-            encoding='utf-8',
-        )
+        write_json(b2b_output_path, b2b_export)
+        write_json(counterpart_output_path, counterpart_export)
 
         final_pairs.append(
             {
@@ -300,13 +295,8 @@ def build_paired_trace_dataset(
                 }
             )
 
-    with pairs_jsonl.open('w', encoding='utf-8') as f:
-        for record in final_pairs:
-            f.write(json.dumps(record, ensure_ascii=False) + '\n')
-
-    with leftovers_jsonl.open('w', encoding='utf-8') as f:
-        for record in leftovers:
-            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    write_jsonl(pairs_jsonl, final_pairs)
+    write_jsonl(leftovers_jsonl, leftovers)
 
     summary_payload = {
         'trace_jsonl': str(trace_jsonl),
@@ -321,9 +311,6 @@ def build_paired_trace_dataset(
         'leftover_counterparts': len(leftovers),
         'selected_counterpart_flow_counts': dict(counterpart_flow_counter),
     }
-    summary_json.write_text(
-        json.dumps(summary_payload, ensure_ascii=False, indent=2) + '\n',
-        encoding='utf-8',
-    )
+    write_json(summary_json, summary_payload)
     print(json.dumps(summary_payload, ensure_ascii=False))
     return summary_payload

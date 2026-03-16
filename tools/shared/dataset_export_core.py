@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import csv
 import json
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
 from shared.artifact_layout import build_dataset_export_paths
+from shared.csvio import write_csv_rows
 from shared.dataset_dedup import ROLE_SORT_ORDER, dedupe_pairs_by_normalized_rows
 from shared.dataset_normalize import normalize_slice_function_names
 from shared.dataset_sources import (
@@ -14,6 +14,7 @@ from shared.dataset_sources import (
     load_tree_sitter_parsers,
     normalize_artifact_path,
 )
+from shared.jsonio import write_json
 
 
 def _prepare_export_outputs(*, csv_path: Path, normalized_slices_dir: Path) -> None:
@@ -241,31 +242,30 @@ def _collect_surviving_pairs(
 
 
 def _write_token_counts_csv(token_count_rows: list[dict[str, Any]], token_counts_csv: Path) -> None:
-    with token_counts_csv.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(
+    write_csv_rows(
+        token_counts_csv,
+        [
+            'pair_id',
+            'filename',
+            'extension',
+            'role',
+            'code_token_count',
+            'input_token_count_with_special',
+            'exceeds_510',
+        ],
+        (
             [
-                'pair_id',
-                'filename',
-                'extension',
-                'role',
-                'code_token_count',
-                'input_token_count_with_special',
-                'exceeds_510',
+                row['pair_id'],
+                row['slice_filename'],
+                row['extension'],
+                row['role'],
+                row['code_token_count'],
+                row['input_token_count_with_special'],
+                row['exceeds_510'],
             ]
-        )
-        for row in token_count_rows:
-            writer.writerow(
-                [
-                    row['pair_id'],
-                    row['slice_filename'],
-                    row['extension'],
-                    row['role'],
-                    row['code_token_count'],
-                    row['input_token_count_with_special'],
-                    row['exceeds_510'],
-                ]
-            )
+            for row in token_count_rows
+        ),
+    )
 
 
 def _build_ordered_rows(
@@ -309,89 +309,89 @@ def _write_dataset_csv_and_slices(
     normalized_slices_dir: Path,
 ) -> dict[tuple[str, str], int]:
     kept_unique_id_by_pair_role: dict[tuple[str, str], int] = {}
-    with csv_path.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(
+    rows: list[list[Any]] = []
+    for idx, row in enumerate(ordered_rows, start=1):
+        output_filename = f'{idx}{row["extension"]}'
+        (normalized_slices_dir / output_filename).write_text(
+            row['normalized_code'], encoding='utf-8'
+        )
+        vulnerable_line_numbers = 1 if int(row['target']) == 1 else ''
+        kept_unique_id_by_pair_role[(str(row['pair_id']), str(row['role']))] = idx
+        rows.append(
             [
-                'file_name',
-                'unique_id',
-                'target',
-                'vulnerable_line_numbers',
-                'project',
-                'source_signature_path',
-                'commit_hash',
-                'dataset_type',
-                'processed_func',
+                idx,
+                idx,
+                row['target'],
+                vulnerable_line_numbers,
+                'Juliet',
+                row['source_signature_path'],
+                '',
+                row['dataset_type'],
+                row['normalized_code'],
             ]
         )
-        for idx, row in enumerate(ordered_rows, start=1):
-            output_filename = f'{idx}{row["extension"]}'
-            (normalized_slices_dir / output_filename).write_text(
-                row['normalized_code'], encoding='utf-8'
-            )
-            vulnerable_line_numbers = 1 if int(row['target']) == 1 else ''
-            kept_unique_id_by_pair_role[(str(row['pair_id']), str(row['role']))] = idx
-            writer.writerow(
-                [
-                    idx,
-                    idx,
-                    row['target'],
-                    vulnerable_line_numbers,
-                    'Juliet',
-                    row['source_signature_path'],
-                    '',
-                    row['dataset_type'],
-                    row['normalized_code'],
-                ]
-            )
+    write_csv_rows(
+        csv_path,
+        [
+            'file_name',
+            'unique_id',
+            'target',
+            'vulnerable_line_numbers',
+            'project',
+            'source_signature_path',
+            'commit_hash',
+            'dataset_type',
+            'processed_func',
+        ],
+        rows,
+    )
 
     return kept_unique_id_by_pair_role
 
 
 def _write_dedup_audit_csv(dedup_audit_rows: list[dict[str, Any]], dedup_dropped_csv: Path) -> None:
-    with dedup_dropped_csv.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(
+    write_csv_rows(
+        dedup_dropped_csv,
+        [
+            'dropped_row_id',
+            'pair_id',
+            'testcase_key',
+            'role',
+            'role_name',
+            'target',
+            'project',
+            'source_signature_path',
+            'normalized_code_hash',
+            'dedup_reason',
+            'dedup_trigger_hashes',
+            'matched_kept_pair_id',
+            'matched_kept_role',
+            'matched_kept_source_signature_path',
+            'matched_kept_unique_id',
+            'processed_func',
+        ],
+        (
             [
-                'dropped_row_id',
-                'pair_id',
-                'testcase_key',
-                'role',
-                'role_name',
-                'target',
-                'project',
-                'source_signature_path',
-                'normalized_code_hash',
-                'dedup_reason',
-                'dedup_trigger_hashes',
-                'matched_kept_pair_id',
-                'matched_kept_role',
-                'matched_kept_source_signature_path',
-                'matched_kept_unique_id',
-                'processed_func',
+                dropped_row_id,
+                row['pair_id'],
+                row['testcase_key'],
+                row['role'],
+                row['role_name'],
+                row['target'],
+                row['project'],
+                row['source_signature_path'],
+                row['normalized_code_hash'],
+                row['dedup_reason'],
+                row['dedup_trigger_hashes'],
+                row['matched_kept_pair_id'],
+                row['matched_kept_role'],
+                row['matched_kept_source_signature_path'],
+                row['matched_kept_unique_id'],
+                row['processed_func'],
             ]
-        )
-        for dropped_row_id, row in enumerate(dedup_audit_rows, start=1):
-            writer.writerow(
-                [
-                    dropped_row_id,
-                    row['pair_id'],
-                    row['testcase_key'],
-                    row['role'],
-                    row['role_name'],
-                    row['target'],
-                    row['project'],
-                    row['source_signature_path'],
-                    row['normalized_code_hash'],
-                    row['dedup_reason'],
-                    row['dedup_trigger_hashes'],
-                    row['matched_kept_pair_id'],
-                    row['matched_kept_role'],
-                    row['matched_kept_source_signature_path'],
-                    row['matched_kept_unique_id'],
-                    row['processed_func'],
-                ]
-            )
+            for dropped_row_id, row in enumerate(dedup_audit_rows, start=1)
+        ),
+    )
 
 
 def run_step07_export_core(
@@ -503,10 +503,7 @@ def run_step07_export_core(
             'test': pair_ids_by_dataset_type.get('test', []),
         },
     }
-    split_manifest_json.write_text(
-        json.dumps(split_manifest, ensure_ascii=False, indent=2) + '\n',
-        encoding='utf-8',
-    )
+    write_json(split_manifest_json, split_manifest)
 
     token_values = [int(row['code_token_count']) for row in token_count_rows]
     mean_value = (sum(token_values) / len(token_values)) if token_values else 0.0
@@ -553,10 +550,7 @@ def run_step07_export_core(
         and 'slice_token_distribution_png' not in summary_payload
     ):
         summary_payload['token_distribution_png'] = str(token_distribution_png)
-    summary_json.write_text(
-        json.dumps(summary_payload, ensure_ascii=False, indent=2) + '\n',
-        encoding='utf-8',
-    )
+    write_json(summary_json, summary_payload)
     print(json.dumps(summary_payload, ensure_ascii=False))
 
     return {

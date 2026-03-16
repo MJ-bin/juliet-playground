@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -25,3 +25,42 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f'Expected JSON object at line {lineno} in {path}')
             records.append(obj)
     return records
+
+
+def write_json(
+    path: Path,
+    payload: Any,
+    *,
+    indent: int = 2,
+    ensure_ascii: bool = False,
+    trailing_newline: bool = True,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=ensure_ascii, indent=indent)
+    if trailing_newline:
+        text += '\n'
+    path.write_text(text, encoding='utf-8')
+
+
+def write_jsonl(
+    path: Path,
+    rows: Iterable[dict[str, Any]],
+    *,
+    ensure_ascii: bool = False,
+    trailing_newline: bool = True,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    iterator = iter(rows)
+    try:
+        first_row = next(iterator)
+    except StopIteration:
+        path.write_text('', encoding='utf-8')
+        return
+
+    with path.open('w', encoding='utf-8') as f:
+        f.write(json.dumps(first_row, ensure_ascii=ensure_ascii))
+        for row in iterator:
+            f.write('\n')
+            f.write(json.dumps(row, ensure_ascii=ensure_ascii))
+        if trailing_newline:
+            f.write('\n')

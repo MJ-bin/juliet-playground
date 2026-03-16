@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import csv
 import datetime
 import json
 import os
@@ -10,6 +9,8 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from shared.csvio import write_csv_rows
+from shared.jsonio import write_json
 from shared.paths import INFER_RESULTS_DIR, RESULT_DIR
 from shared.pipeline_runs import find_latest_prefixed_dir
 
@@ -52,34 +53,31 @@ def write_signature_stats_csv(non_empty_dir: Path, stats_map) -> None:
         'bug_trace_empty_skipped',
     ]
     total = {key: 0 for key in columns[1:]}
-
-    with csv_path.open('w', newline='', encoding='utf-8') as fp:
-        writer = csv.writer(fp)
-        writer.writerow(columns)
-
-        for group_key in sorted(stats_map.keys()):
-            row = stats_map[group_key]
-            writer.writerow(
-                [
-                    group_key,
-                    row['report_alarms_total'],
-                    row['bug_trace_nonempty'],
-                    row['signatures_written'],
-                    row['bug_trace_empty_skipped'],
-                ]
-            )
-            for key in total:
-                total[key] += row[key]
-
-        writer.writerow(
+    rows: list[list[object]] = []
+    for group_key in sorted(stats_map.keys()):
+        row = stats_map[group_key]
+        rows.append(
             [
-                'TOTAL',
-                total['report_alarms_total'],
-                total['bug_trace_nonempty'],
-                total['signatures_written'],
-                total['bug_trace_empty_skipped'],
+                group_key,
+                row['report_alarms_total'],
+                row['bug_trace_nonempty'],
+                row['signatures_written'],
+                row['bug_trace_empty_skipped'],
             ]
         )
+        for key in total:
+            total[key] += row[key]
+
+    rows.append(
+        [
+            'TOTAL',
+            total['report_alarms_total'],
+            total['bug_trace_nonempty'],
+            total['signatures_written'],
+            total['bug_trace_empty_skipped'],
+        ]
+    )
+    write_csv_rows(csv_path, columns, rows)
 
 
 def generate_signatures(
@@ -134,8 +132,7 @@ def generate_signatures(
             testcase_dir = non_empty_dir / testcase_dir_name
             os.makedirs(testcase_dir, exist_ok=True)
             output_json = testcase_dir / f'{cnt}.json'
-            with output_json.open('w', encoding='utf-8') as fp:
-                json.dump(alarm, fp, indent=2)
+            write_json(output_json, alarm, ensure_ascii=True, trailing_newline=False)
             stats_map[group_key]['signatures_written'] += 1
             cnt += 1
 

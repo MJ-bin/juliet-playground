@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared.jsonio import write_json, write_jsonl
 from shared.juliet_keys import derive_testcase_key_from_file_name
 
 TARGET_TAGS = {'flaw', 'comment_flaw', 'comment_fix'}
@@ -207,15 +208,9 @@ def filter_traces_by_flow(
     matched_path = output_dir / 'trace_flow_match_partial_or_strict.jsonl'
     summary_path = output_dir / 'summary.json'
 
-    with all_path.open('w', encoding='utf-8') as f:
-        for rec in all_records:
-            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-    with strict_path.open('w', encoding='utf-8') as f:
-        for rec in strict_records:
-            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-    with matched_path.open('w', encoding='utf-8') as f:
-        for rec in partial_records:
-            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    write_jsonl(all_path, all_records)
+    write_jsonl(strict_path, strict_records)
+    write_jsonl(matched_path, partial_records)
 
     summary = {
         'flow_xml': str(flow_xml),
@@ -230,9 +225,7 @@ def filter_traces_by_flow(
             'partial_or_strict': str(matched_path),
         },
     }
-    summary_path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-    )
+    write_json(summary_path, summary)
     print(json.dumps(summary, ensure_ascii=False))
     return summary
 
