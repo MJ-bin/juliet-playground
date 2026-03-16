@@ -16,7 +16,7 @@ from typing import Any, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = REPO_ROOT / 'tests' / 'golden' / 'fixtures' / 'cwe121_subset'
-DEFAULT_SOURCE_RUN = REPO_ROOT / 'artifacts' / 'pipeline-runs' / 'run-2026.03.10-00:49:21'
+DEFAULT_SOURCE_RUN = REPO_ROOT / 'artifacts' / 'pipeline-runs' / 'run-2026.03.13-13:56:23'
 
 SELECTED_TESTCASE_KEYS = [
     'CWE121_01-CWE121_Stack_Based_Buffer_Overflow__CWE806_char_declare_ncat',
