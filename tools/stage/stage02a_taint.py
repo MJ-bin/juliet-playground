@@ -8,7 +8,7 @@ from pathlib import Path
 
 from shared.csvio import write_csv_rows
 from shared.dataset_sources import load_tree_sitter_parsers
-from shared.jsonio import write_json, write_jsonl
+from shared.jsonio import write_json, write_jsonl, write_summary_json
 from shared.juliet_manifest import build_manifest_source_index
 from shared.source_parsing import PARSER_LANG_BY_SUFFIX, SOURCE_EXTS, node_first_line_text
 
@@ -49,6 +49,17 @@ class ResolutionResult:
     candidate_count: int
     selected_kind: str
     selected_conditional: str
+
+
+@dataclass(frozen=True)
+class TaintExtractionOutputs:
+    output_dir: Path
+    all_comment_codes: list[str]
+    counts: Counter[str]
+    candidate_map: dict[str, list[dict[str, int | str]]]
+    duplicate_key_skipped: int
+    flaw_records_processed: int
+    extra_stats: dict[str, int]
 
 
 def _build_line_nodes(root_node) -> dict[int, list[object]]:
@@ -356,33 +367,25 @@ def _write_pulse_taint_config(
     }
 
 
-def write_outputs(
-    output_dir: Path,
-    all_comment_codes: list[str],
-    counts: Counter[str],
-    candidate_map: dict[str, list[dict[str, int | str]]],
-    duplicate_key_skipped: int,
-    flaw_records_processed: int,
-    extra_stats: dict[str, int],
-) -> Counter[str]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def write_outputs(outputs: TaintExtractionOutputs) -> Counter[str]:
+    outputs.output_dir.mkdir(parents=True, exist_ok=True)
 
-    unique_codes = sorted(counts)
-    (output_dir / 'code_unique.txt').write_text(
+    unique_codes = sorted(outputs.counts)
+    (outputs.output_dir / 'code_unique.txt').write_text(
         '\n'.join(unique_codes) + ('\n' if unique_codes else ''), encoding='utf-8'
     )
 
     write_csv_rows(
-        output_dir / 'code_frequency.csv',
+        outputs.output_dir / 'code_frequency.csv',
         ['count', 'code'],
-        ([cnt, code] for code, cnt in sorted(counts.items(), key=lambda x: (-x[1], x[0]))),
+        ([cnt, code] for code, cnt in sorted(outputs.counts.items(), key=lambda x: (-x[1], x[0]))),
     )
 
-    write_json(output_dir / 'source_sink_candidate_map.json', candidate_map)
+    write_json(outputs.output_dir / 'source_sink_candidate_map.json', outputs.candidate_map)
 
-    function_name_counts = _count_function_names(candidate_map)
+    function_name_counts = _count_function_names(outputs.candidate_map)
     write_csv_rows(
-        output_dir / 'function_name_frequency.csv',
+        outputs.output_dir / 'function_name_frequency.csv',
         ['count', 'function_name'],
         (
             [cnt, name]
@@ -390,24 +393,24 @@ def write_outputs(
         ),
     )
 
-    (output_dir / 'function_name_unique.txt').write_text(
+    (outputs.output_dir / 'function_name_unique.txt').write_text(
         '\n'.join(sorted(function_name_counts)) + ('\n' if function_name_counts else ''),
         encoding='utf-8',
     )
 
     summary = {
-        'total_code_entries': len(all_comment_codes),
-        'unique_code_entries': len(counts),
-        'max_frequency': max(counts.values()) if counts else 0,
-        'candidate_map_keys': len(candidate_map),
-        'keys_with_calls': sum(1 for v in candidate_map.values() if v),
+        'total_code_entries': len(outputs.all_comment_codes),
+        'unique_code_entries': len(outputs.counts),
+        'max_frequency': max(outputs.counts.values()) if outputs.counts else 0,
+        'candidate_map_keys': len(outputs.candidate_map),
+        'keys_with_calls': sum(1 for v in outputs.candidate_map.values() if v),
         'unique_function_names': len(function_name_counts),
         'total_function_name_occurrences': sum(function_name_counts.values()),
-        'duplicate_key_skipped': duplicate_key_skipped,
-        'flaw_records_processed': flaw_records_processed,
-        **extra_stats,
+        'duplicate_key_skipped': outputs.duplicate_key_skipped,
+        'flaw_records_processed': outputs.flaw_records_processed,
+        **outputs.extra_stats,
     }
-    write_json(output_dir / 'summary.json', summary)
+    write_summary_json(outputs.output_dir / 'summary.json', summary, echo=False)
     return function_name_counts
 
 
@@ -492,13 +495,15 @@ def extract_unique_code_fields(
     extra_stats = {**macro_dump_stats, **macro_stats}
 
     function_name_counts = write_outputs(
-        output_dir,
-        all_comment_codes,
-        counts,
-        candidate_map,
-        duplicate_key_skipped,
-        flaw_records_processed,
-        extra_stats,
+        TaintExtractionOutputs(
+            output_dir=output_dir,
+            all_comment_codes=all_comment_codes,
+            counts=counts,
+            candidate_map=candidate_map,
+            duplicate_key_skipped=duplicate_key_skipped,
+            flaw_records_processed=flaw_records_processed,
+            extra_stats=extra_stats,
+        )
     )
 
     pulse_output_path = pulse_taint_config_output or (output_dir / DEFAULT_PULSE_TAINT_CONFIG_NAME)

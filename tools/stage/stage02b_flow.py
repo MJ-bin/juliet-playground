@@ -12,7 +12,7 @@ from pathlib import Path
 
 from shared.artifact_layout import PathBundle
 from shared.csvio import write_csv_rows
-from shared.jsonio import write_json
+from shared.jsonio import write_json, write_summary_json
 from shared.jsonio import write_jsonl as _write_jsonl
 from shared.juliet_manifest import build_manifest_source_index
 
@@ -78,7 +78,7 @@ def extract_function_inventory(
         ],
     }
 
-    write_json(output_summary, summary, trailing_newline=False)
+    write_summary_json(output_summary, summary, echo=False)
 
     return {
         'output_csv': str(output_csv),
@@ -151,6 +151,15 @@ class Stage02BOutputPaths(PathBundle):
         'manifest_with_testcase_flows_xml',
         'testcase_flow_summary_json',
     )
+
+
+@dataclass(frozen=True)
+class Stage02BCategorizeContext:
+    input_csv: Path
+    manifest_xml: Path
+    source_root: Path
+    output_jsonl: Path
+    output_nested_json: Path
 
 
 def split_simple_name(function_name: str) -> str:
@@ -466,11 +475,7 @@ def build_nested_output(
 
 def build_summary(
     *,
-    input_csv: Path,
-    manifest_xml: Path,
-    source_root: Path,
-    output_jsonl: Path,
-    output_nested_json: Path,
+    context: Stage02BCategorizeContext,
     rows: list[FunctionRow],
     family_groups: dict[str, list[FunctionRow]],
     role_groups: dict[str, list[FunctionRow]],
@@ -478,11 +483,11 @@ def build_summary(
     family_role_groups: dict[str, dict[str, list[FunctionRow]]],
 ) -> dict[str, object]:
     return {
-        'input_csv': str(input_csv),
-        'manifest_xml': str(manifest_xml),
-        'source_root': str(source_root),
-        'output_jsonl': str(output_jsonl),
-        'output_nested_json': str(output_nested_json),
+        'input_csv': str(context.input_csv),
+        'manifest_xml': str(context.manifest_xml),
+        'source_root': str(context.source_root),
+        'output_jsonl': str(context.output_jsonl),
+        'output_nested_json': str(context.output_nested_json),
         'generated_at': datetime.now(timezone.utc).isoformat(),
         'total_unique_function_names': len(rows),
         'total_weighted_count': sum(r.count for r in rows),
@@ -542,18 +547,20 @@ def categorize_function_names(
     write_json(output_nested_json, nested, trailing_newline=False)
 
     summary = build_summary(
-        input_csv=input_csv,
-        manifest_xml=manifest_xml,
-        source_root=source_root,
-        output_jsonl=output_jsonl,
-        output_nested_json=output_nested_json,
+        context=Stage02BCategorizeContext(
+            input_csv=input_csv,
+            manifest_xml=manifest_xml,
+            source_root=source_root,
+            output_jsonl=output_jsonl,
+            output_nested_json=output_nested_json,
+        ),
         rows=rows,
         family_groups=family_groups,
         role_groups=role_groups,
         variant_groups=variant_groups,
         family_role_groups=family_role_groups,
     )
-    write_json(output_summary, summary, trailing_newline=False)
+    write_summary_json(output_summary, summary, echo=False)
 
     return {
         'output_jsonl': str(output_jsonl),
@@ -726,7 +733,7 @@ def add_flow_tags_to_testcase(
         'unresolved_comment_records': unresolved_comment,
         'unresolved_flaw_records': unresolved_flaw,
     }
-    write_json(summary_json, summary)
+    write_summary_json(summary_json, summary, echo=False)
     return summary
 
 
