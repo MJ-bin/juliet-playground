@@ -15,18 +15,13 @@ PYC_C_FUNC_RE = re.compile(
     re.IGNORECASE,
 )
 FLOW_PARTITION_TARGET_TAGS = ('comment_flaw', 'comment_fix', 'flaw')
-FLOW_OUTPUT_TAG_BY_INPUT_TAG = {
-    'comment_flaw': 'flaw',
-    'comment_fix': 'fix',
-    'flaw': 'flaw',
-}
+FLOW_OUTPUT_TAG_BY_INPUT_TAG = {'comment_flaw': 'flaw', 'comment_fix': 'fix', 'flaw': 'flaw'}
 FLOW_ORIGIN_BY_INPUT_TAG = {
     'comment_flaw': 'comment_flaw',
     'comment_fix': 'comment_fix',
     'flaw': 'manifest_flaw',
 }
-MANIFEST_FLAW_ORIGIN = 'manifest_flaw'
-COMMENT_FLAW_ORIGIN = 'comment_flaw'
+MANIFEST_FLAW_ORIGIN, COMMENT_FLAW_ORIGIN = 'manifest_flaw', 'comment_flaw'
 BASE_FLOW_ORDER = ('b2b', 'b2g', 'g2b')
 FAMILY_TO_FLOW = {
     'b2b_family': 'b2b',
@@ -159,6 +154,22 @@ def _dedup_flow_items(items: list[ET.Element]) -> tuple[list[ET.Element], int]:
     return deduped, removed_comment_flaw
 
 
+def _resolve_flow_assignment(
+    *, child: ET.Element, function_lines: dict[str, list[int]], fn_to_flow: dict[str, str]
+) -> tuple[str, str] | None:
+    function_name: str | None
+    if child.tag in COMMENT_TAGS:
+        function_name = child.attrib.get('function')
+    else:
+        line_no = int(child.attrib.get('line', '0') or 0)
+        function_name = infer_function_for_flaw(line_no, function_lines)
+
+    flow = fn_to_flow.get(function_name or '')
+    if flow is None:
+        return None
+    return flow_type_from_function(flow, function_name), function_name or ''
+
+
 def _add_flow_tags_to_tree(
     *,
     tree: ET.ElementTree,
@@ -184,41 +195,35 @@ def _add_flow_tags_to_tree(
         for file_elem in testcase.findall('file'):
             file_path = file_elem.attrib.get('path', '')
             function_lines: dict[str, list[int]] = defaultdict(list)
-
             for child in list(file_elem):
                 if child.tag not in COMMENT_TAGS:
                     continue
                 function_name = child.attrib.get('function')
-                line_no = int(child.attrib.get('line', '0') or 0)
                 if function_name:
-                    function_lines[function_name].append(line_no)
+                    function_lines[function_name].append(int(child.attrib.get('line', '0') or 0))
 
             for child in list(file_elem):
                 if child.tag not in FLOW_PARTITION_TARGET_TAGS:
                     continue
 
-                line_no = int(child.attrib.get('line', '0') or 0)
-                inferred_function = None
-                if child.tag in COMMENT_TAGS:
-                    function_name = child.attrib.get('function')
-                    flow = fn_to_flow.get(function_name or '')
-                    if flow is None:
+                assignment = _resolve_flow_assignment(
+                    child=child,
+                    function_lines=function_lines,
+                    fn_to_flow=fn_to_flow,
+                )
+                if assignment is None:
+                    if child.tag in COMMENT_TAGS:
                         unresolved_comment += 1
-                        continue
-                    flow_type = flow_type_from_function(flow, function_name)
-                else:
-                    inferred_function = infer_function_for_flaw(line_no, function_lines)
-                    flow = fn_to_flow.get(inferred_function or '')
-                    if flow is None:
+                    else:
                         unresolved_flaw += 1
-                        continue
-                    flow_type = flow_type_from_function(flow, inferred_function)
-                    function_name = inferred_function
+                    continue
+
+                flow_type, function_name = assignment
 
                 copied = _normalize_flow_item(
                     child=child,
                     file_path=file_path,
-                    function_name=function_name or '',
+                    function_name=function_name,
                 )
                 flow_buckets[flow_type].append(copied)
 
