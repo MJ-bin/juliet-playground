@@ -92,6 +92,13 @@ source .venv/bin/activate && python tools/run_pipeline.py stage03 78
 source .venv/bin/activate && python tools/run_pipeline.py full 78
 ```
 
+pair 기반 기존 흐름을 유지하려면 기본값 그대로 실행하면 됩니다.
+trace-first dataset export를 쓰려면:
+
+```bash
+source .venv/bin/activate && python tools/run_pipeline.py full 78 --disable-pair
+```
+
 전체 CWE에 대해 실행하려면:
 
 ```bash
@@ -110,10 +117,10 @@ source .venv/bin/activate && python tools/run_pipeline.py full --all
 3. `02b_flow`: 함수 inventory 분류 + testcase별 flow XML 생성
 4. `03_infer-results`, `03_signatures`: Infer 실행과 signature 생성
 5. `04_trace_flow`: trace와 testcase flow 매칭
-6. `05_pair_trace_ds`: strict trace에서 `b2b` / counterpart pair 선택
-7. `06_slices`: pair signature의 bug trace를 소스 slice로 변환
+6. `05_pair_trace_ds` 또는 `05_trace_ds`: strict trace에서 pair 선택 또는 trace-first dataset 준비
+7. `06_slices` 또는 `06_trace_slices`: pair signature 또는 trace bug trace를 소스 slice로 변환
 8. `07_dataset_export`: normalize / dedup / token filtering / split / CSV export
-9. `07b`: train patched counterpart 평가용 export 추가 생성
+9. `07b`: pair 모드에서만 train patched counterpart 평가용 export 추가 생성
 
 ### Flow XML note
 

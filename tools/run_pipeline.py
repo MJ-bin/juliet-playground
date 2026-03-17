@@ -15,6 +15,7 @@ from shared.artifact_layout import (
     build_pair_trace_paths,
     build_patched_pairing_paths,
     build_slice_stage_paths,
+    build_trace_dataset_paths,
 )
 from shared.paths import PROJECT_HOME, PULSE_TAINT_CONFIG, RESULT_DIR
 from stage import stage01_manifest as _stage01_manifest
@@ -23,13 +24,19 @@ from stage import stage02b_flow as _stage02b_flow
 from stage import stage03_infer as _stage03_infer
 from stage import stage04_trace_flow as _stage04_trace_flow
 from stage import stage05_pair_trace as _stage05_pair_trace
+from stage import stage05_trace_dataset as _stage05_trace_dataset
 from stage import stage06_slices as _stage06_slices
+from stage import stage06_trace_slices as _stage06_trace_slices
 from stage import stage07_dataset_export as _stage07_dataset_export
+from stage import stage07_trace_dataset_export as _stage07_trace_dataset_export
 from stage import stage07b_patched_export as _stage07b_patched_export
 
 compute_pair_split = _stage07_dataset_export.compute_pair_split
 export_dataset_from_pipeline = _stage07_dataset_export.export_dataset_from_pipeline
 export_primary_dataset = _stage07_dataset_export.export_primary_dataset
+export_trace_dataset_from_pipeline = (
+    _stage07_trace_dataset_export.export_trace_dataset_from_pipeline
+)
 dedupe_pairs_by_normalized_rows = _dataset_dedup.dedupe_pairs_by_normalized_rows
 export_patched_dataset = _stage07b_patched_export.export_patched_dataset
 
@@ -47,6 +54,7 @@ class FullRunConfig:
     pair_split_seed: int
     pair_train_ratio: float
     dedup_mode: str
+    enable_pair: bool
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,6 +93,10 @@ def parse_args() -> argparse.Namespace:
     full.add_argument('--pair-split-seed', type=int, default=1234)
     full.add_argument('--pair-train-ratio', type=float, default=0.8)
     full.add_argument('--dedup-mode', choices=['none', 'row'], default='row')
+    pair_mode = full.add_mutually_exclusive_group()
+    pair_mode.add_argument('--enable-pair', dest='enable_pair', action='store_true')
+    pair_mode.add_argument('--disable-pair', dest='enable_pair', action='store_false')
+    full.set_defaults(enable_pair=True)
 
     return parser.parse_args()
 
@@ -102,7 +114,9 @@ def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, obje
     flow_dir = run_dir / '02b_flow'
     trace_dir = run_dir / '04_trace_flow'
     pair_paths = build_pair_trace_paths(run_dir / '05_pair_trace_ds')
+    trace_paths = build_trace_dataset_paths(run_dir / '05_trace_ds')
     slice_paths = build_slice_stage_paths(run_dir / '06_slices')
+    trace_slice_paths = build_slice_stage_paths(run_dir / '06_trace_slices')
     dataset_paths = build_dataset_export_paths(run_dir / '07_dataset_export')
 
     return {
@@ -119,7 +133,9 @@ def _build_full_run_paths(*, run_dir: Path, source_root: Path) -> dict[str, obje
         'trace_strict_jsonl': trace_dir / 'trace_flow_match_strict.jsonl',
         'stage02b': _stage02b_flow.build_stage02b_output_paths(flow_dir),
         'pair': pair_paths,
+        'trace': trace_paths,
         'slices': slice_paths,
+        'trace_slices': trace_slice_paths,
         'dataset': dataset_paths,
         'patched_pair': build_patched_pairing_paths(
             pair_paths['output_dir'],
@@ -163,6 +179,7 @@ def _normalize_full_run_config(config: FullRunConfig) -> FullRunConfig:
         pair_split_seed=config.pair_split_seed,
         pair_train_ratio=config.pair_train_ratio,
         dedup_mode=config.dedup_mode,
+        enable_pair=config.enable_pair,
     )
 
 
@@ -278,6 +295,17 @@ def run_step05_pair_trace(*, paths: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def run_step05_trace_dataset(*, paths: dict[str, object]) -> dict[str, object]:
+    result = _stage05_trace_dataset.build_trace_dataset(
+        trace_jsonl=paths['trace_strict_jsonl'],
+        output_dir=paths['trace']['output_dir'],
+        overwrite=False,
+    )
+    for key in ('traces_jsonl', 'summary_json'):
+        _require_exists(paths['trace'][key], f'05_trace_ds/{key}')
+    return result
+
+
 def run_step06_slices(*, paths: dict[str, object]) -> dict[str, object]:
     result = _stage06_slices.generate_slices(
         signature_db_dir=paths['pair']['paired_signatures_dir'],
@@ -286,6 +314,17 @@ def run_step06_slices(*, paths: dict[str, object]) -> dict[str, object]:
     )
     for key in ('slice_dir', 'summary_json'):
         _require_exists(paths['slices'][key], f'06_slices/{key}')
+    return result
+
+
+def run_step06_trace_slices(*, paths: dict[str, object]) -> dict[str, object]:
+    result = _stage06_trace_slices.generate_trace_slices(
+        traces_jsonl=paths['trace']['traces_jsonl'],
+        output_dir=paths['trace_slices']['output_dir'],
+        overwrite=False,
+    )
+    for key in ('slice_dir', 'summary_json'):
+        _require_exists(paths['trace_slices'][key], f'06_trace_slices/{key}')
     return result
 
 
@@ -300,6 +339,26 @@ def run_step07_dataset_export(
         pairs_jsonl=paths['pair']['pairs_jsonl'],
         paired_signatures_dir=paths['pair']['paired_signatures_dir'],
         slice_dir=paths['slices']['slice_dir'],
+        output_dir=paths['dataset']['output_dir'],
+        split_seed=pair_split_seed,
+        train_ratio=pair_train_ratio,
+        dedup_mode=dedup_mode,
+    )
+    for key in ('csv_path', 'normalized_slices_dir', 'split_manifest_json', 'summary_json'):
+        _require_exists(paths['dataset'][key], f'07_dataset_export/{key}')
+    return result
+
+
+def run_step07_trace_dataset_export(
+    *,
+    paths: dict[str, object],
+    pair_split_seed: int,
+    pair_train_ratio: float,
+    dedup_mode: str,
+) -> dict[str, object]:
+    result = export_trace_dataset_from_pipeline(
+        traces_jsonl=paths['trace']['traces_jsonl'],
+        slice_dir=paths['trace_slices']['slice_dir'],
         output_dir=paths['dataset']['output_dir'],
         split_seed=pair_split_seed,
         train_ratio=pair_train_ratio,
@@ -368,18 +427,29 @@ def run_full_pipeline(config: FullRunConfig) -> int:
             paths=paths,
             signature_non_empty_dir=Path(stage03['artifacts']['signature_non_empty_dir']),
         )
-        run_step05_pair_trace(paths=paths)
-        run_step06_slices(paths=paths)
-        run_step07_dataset_export(
-            paths=paths,
-            pair_split_seed=config.pair_split_seed,
-            pair_train_ratio=config.pair_train_ratio,
-            dedup_mode=config.dedup_mode,
-        )
-        run_step07b_train_patched_counterparts(
-            paths=paths,
-            dedup_mode=config.dedup_mode,
-        )
+        if config.enable_pair:
+            run_step05_pair_trace(paths=paths)
+            run_step06_slices(paths=paths)
+            run_step07_dataset_export(
+                paths=paths,
+                pair_split_seed=config.pair_split_seed,
+                pair_train_ratio=config.pair_train_ratio,
+                dedup_mode=config.dedup_mode,
+            )
+            run_step07b_train_patched_counterparts(
+                paths=paths,
+                dedup_mode=config.dedup_mode,
+            )
+        else:
+            run_step05_trace_dataset(paths=paths)
+            run_step06_trace_slices(paths=paths)
+            run_step07_trace_dataset_export(
+                paths=paths,
+                pair_split_seed=config.pair_split_seed,
+                pair_train_ratio=config.pair_train_ratio,
+                dedup_mode=config.dedup_mode,
+            )
+            print('Skipping 07b_train_patched_counterparts_export because --disable-pair is set.')
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -402,6 +472,7 @@ def main() -> int:
                 pair_split_seed=args.pair_split_seed,
                 pair_train_ratio=args.pair_train_ratio,
                 dedup_mode=args.dedup_mode,
+                enable_pair=args.enable_pair,
             )
         )
     except ValueError as exc:

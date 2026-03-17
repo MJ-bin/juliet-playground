@@ -39,6 +39,15 @@ def build_pair_trace_paths(pair_dir: Path) -> dict[str, Path]:
     }
 
 
+def build_trace_dataset_paths(trace_dir: Path) -> dict[str, Path]:
+    trace_dir = Path(trace_dir)
+    return {
+        'output_dir': trace_dir,
+        'traces_jsonl': trace_dir / 'traces.jsonl',
+        'summary_json': trace_dir / 'summary.json',
+    }
+
+
 def build_patched_pairing_paths(
     pair_dir: Path,
     dataset_basename: str = TRAIN_PATCHED_COUNTERPARTS_BASENAME,

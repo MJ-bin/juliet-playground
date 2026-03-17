@@ -24,6 +24,8 @@ def test_build_full_run_paths_recreates_expected_layout(tmp_path):
         paths['trace_strict_jsonl']
         == run_dir.resolve() / '04_trace_flow' / 'trace_flow_match_strict.jsonl'
     )
+    assert paths['trace']['traces_jsonl'] == run_dir.resolve() / '05_trace_ds' / 'traces.jsonl'
+    assert paths['trace_slices']['slice_dir'] == run_dir.resolve() / '06_trace_slices' / 'slice'
     assert (
         paths['dataset']['summary_json'] == run_dir.resolve() / '07_dataset_export' / 'summary.json'
     )
@@ -168,6 +170,58 @@ def test_run_step07_dataset_export_uses_primary_dataset_api(tmp_path, monkeypatc
     )
 
     assert captured['pairs_jsonl'] == paths['pair']['pairs_jsonl']
+    assert captured['output_dir'] == paths['dataset']['output_dir']
+    assert captured['split_seed'] == 1234
+    assert captured['train_ratio'] == 0.8
+    assert captured['dedup_mode'] == 'row'
+    assert result['artifacts']['split_manifest_json'] == str(
+        paths['dataset']['split_manifest_json']
+    )
+
+
+def test_run_step07_trace_dataset_export_uses_trace_dataset_api(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_pipeline_step07_trace_helper',
+        REPO_ROOT / 'tools/run_pipeline.py',
+    )
+
+    paths = module._build_full_run_paths(
+        run_dir=tmp_path / 'run', source_root=tmp_path / 'juliet' / 'C'
+    )
+    captured: dict[str, object] = {}
+
+    def fake_export_trace_dataset_from_pipeline(**kwargs):
+        captured.update(kwargs)
+        paths['dataset']['normalized_slices_dir'].mkdir(parents=True, exist_ok=True)
+        for output_path in [
+            paths['dataset']['csv_path'],
+            paths['dataset']['split_manifest_json'],
+            paths['dataset']['summary_json'],
+        ]:
+            write_text(output_path, 'ok\n')
+        return {
+            'artifacts': {
+                'csv_path': str(paths['dataset']['csv_path']),
+                'normalized_slices_dir': str(paths['dataset']['normalized_slices_dir']),
+                'split_manifest_json': str(paths['dataset']['split_manifest_json']),
+                'summary_json': str(paths['dataset']['summary_json']),
+            },
+            'stats': {'counts': {'traces_total': 1}},
+        }
+
+    monkeypatch.setattr(
+        module, 'export_trace_dataset_from_pipeline', fake_export_trace_dataset_from_pipeline
+    )
+
+    result = module.run_step07_trace_dataset_export(
+        paths=paths,
+        pair_split_seed=1234,
+        pair_train_ratio=0.8,
+        dedup_mode='row',
+    )
+
+    assert captured['traces_jsonl'] == paths['trace']['traces_jsonl']
+    assert captured['slice_dir'] == paths['trace_slices']['slice_dir']
     assert captured['output_dir'] == paths['dataset']['output_dir']
     assert captured['split_seed'] == 1234
     assert captured['train_ratio'] == 0.8
