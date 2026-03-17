@@ -78,10 +78,10 @@ def parse_args() -> argparse.Namespace:
         help='입력 manifest_with_testcase_flows.xml 경로',
     )
     parser.add_argument(
-        '--output-json',
+        '--output-xml',
         type=Path,
         required=True,
-        help='source/sink 분류 결과를 저장할 JSON 경로',
+        help='source/sink 분류 결과를 저장할 xml 경로',
     )
     parser.add_argument(
         '--exceptions-xml',
