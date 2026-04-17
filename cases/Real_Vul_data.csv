@@ -53,7 +53,7 @@ udscs_do_read(&conn);
 udscs_read_complete(connp);
 conn->read_callback(connp, &conn->header, conn->data.buf);
 vdagent_file_xfers_data(agent->xfers, (VDAgentFileXferDataMessage *)data);
-snprintf(buf, PATH_MAX, "xdg-open '%s'&", xfers->save_dir);
+snprintf(buf, PATH_MAX, ""xdg-open '%s'&"", xfers->save_dir);
 status = system(buf);
 "
 7,7,0,,vd_agent,,,test,"
@@ -61,7 +61,7 @@ udscs_do_read(&conn);
 udscs_read_complete(connp);
 conn->read_callback(connp, &conn->header, conn->data.buf);
 vdagent_file_xfers_data(agent->xfers, (VDAgentFileXferDataMessage *)data);
-gchar *argv[] = { "xdg-open", xfers->save_dir, NULL };
+gchar *argv[] = { ""xdg-open"", xfers->save_dir, NULL };
 if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error))
 "
 8,8,1,"1,2",openjpeg,,e7640f5,test,"
