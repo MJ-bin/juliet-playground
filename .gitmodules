@@ -36,3 +36,7 @@
 [submodule "cases/php__CVE-2015-8617/patched/repo"]
 	path = cases/php__CVE-2015-8617/patched/repo
 	url = https://github.com/php/php-src
+
+[submodule "cases/radare2__CVE-2019-16718/vulnerable/repo"]
+	path = cases/radare2__CVE-2019-16718/vulnerable/repo
+	url = https://github.com/radareorg/radare2
