@@ -114,3 +114,43 @@ while (add_post_var(arr, vars, eof TSRMLS_CC)) {
 start = var->ptr + var->already_scanned;
 vsep = memchr(start, '&', var->end - start);
 "
+12,12,1,"1",radare2,,,test,"
+RList *symbols = r_bin_get_symbols (r->bin);
+r_list_foreach (symbols, iter, symbol) {
+char *r_symbol_name = r_str_escape_utf8 (symbol->name, false, true);
+char *module = strdup (r_symbol_name);
+char *p = strstr (module, "".dll_"");
+char *symname = __filterShell (p + 5);
+r_cons_printf (""k bin/pe/%s/%d=%s.%s\n"", module, symbol->ordinal, r->bin->prefix, symname);
+ptr = str = r_core_cmd_str (core, inp);
+char *p = r_str_append (strdup (ptr), filter);
+r_core_cmd0 (core, p);
+R_API int r_core_cmd0(RCore *core, const char *cmd) {
+return r_core_cmd (core, cmd, 0);
+R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
+r_str_cpy (cmd, cstr);
+for (rcmd = cmd;;) {
+ret = r_core_cmd_subst (core, rcmd);
+static int r_core_cmd_subst(RCore *core, char *cmd) {
+icmd = strdup (cmd);
+cmd = r_str_trim_head_tail (icmd);
+ret = r_core_cmd_subst_i (core, cmd, colon, (rep == orep - 1) ? &tmpseek : NULL);
+cmd = r_str_trim_head_tail (cmd);
+ptr = strchr (cmd, '`');
+str = r_core_cmd_str_pipe (core, ptr + 1);
+R_API char *r_core_cmd_str_pipe(RCore *core, const char *cmd) {
+char *_cmd = strdup (cmd);
+r_core_cmd_subst (core, _cmd);
+icmd = strdup (cmd);
+cmd = r_str_trim_head_tail (icmd);
+ret = r_core_cmd_subst_i (core, cmd, colon, (rep == orep - 1) ? &tmpseek : NULL);
+cmd = r_str_trim_head_tail (cmd);
+rc = cmd? r_cmd_call (core->rcmd, r_str_trim_head (cmd)): false;
+static int cmd_system(void *data, const char *input) {
+char *cmd = r_core_sysenv_begin (core, input);
+ret = r_sys_cmd (cmd);
+R_API int r_sys_cmd(const char *str) {
+return r_sandbox_system (str, 1);
+R_API int r_sandbox_system (const char *x, int n) {
+return system (x);
+"
