@@ -53,7 +53,7 @@ udscs_do_read(&conn);
 udscs_read_complete(connp);
 conn->read_callback(connp, &conn->header, conn->data.buf);
 vdagent_file_xfers_data(agent->xfers, (VDAgentFileXferDataMessage *)data);
-snprintf(buf, PATH_MAX, "xdg-open '%s'&", xfers->save_dir);
+snprintf(buf, PATH_MAX, ""xdg-open '%s'&"", xfers->save_dir);
 status = system(buf);
 "
 7,7,0,,vd_agent,,,test,"
@@ -61,7 +61,7 @@ udscs_do_read(&conn);
 udscs_read_complete(connp);
 conn->read_callback(connp, &conn->header, conn->data.buf);
 vdagent_file_xfers_data(agent->xfers, (VDAgentFileXferDataMessage *)data);
-gchar *argv[] = { "xdg-open", xfers->save_dir, NULL };
+gchar *argv[] = { ""xdg-open"", xfers->save_dir, NULL };
 if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error))
 "
 8,8,1,"1,2",openjpeg,,e7640f5,test,"
@@ -153,4 +153,20 @@ R_API int r_sys_cmd(const char *str) {
 return r_sandbox_system (str, 1);
 R_API int r_sandbox_system (const char *x, int n) {
 return system (x);
+"
+13,13,1,"1",rsyslog,,,test,"
+CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
+CHKiRet(actionCallDoAction(pThis, actParams, pWti));
+iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+iRet = writeZMQ(ppString[0], pData);
+CHKiRet(initZMQ(pData));
+if(-1 == zsocket_bind(pData->socket, (char*)pData->description)) {
+"
+14,14,0,,rsyslog,,,test,"
+CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
+CHKiRet(actionCallDoAction(pThis, actParams, pWti));
+iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+iRet = writeZMQ(ppString[0], pData);
+CHKiRet(initZMQ(pData));
+if(-1 == zsocket_bind(pData->socket, ""%s"", (char*)pData->description)) {
 "
