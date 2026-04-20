@@ -213,3 +213,5 @@ artifacts/
 experiments/*/outputs/
 *.db
 cases/*/runs/
+
+.codex

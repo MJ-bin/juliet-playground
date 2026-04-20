@@ -36,3 +36,9 @@
 [submodule "cases/php__CVE-2015-8617/patched/repo"]
 	path = cases/php__CVE-2015-8617/patched/repo
 	url = https://github.com/php/php-src
+[submodule "cases/plasma-workspace__CVE-2018-6791/patched/repo"]
+	path = cases/plasma-workspace__CVE-2018-6791/patched/repo
+	url = https://github.com/KDE/plasma-workspace.git
+[submodule "cases/plasma-workspace__CVE-2018-6791/vulnerable/repo"]
+	path = cases/plasma-workspace__CVE-2018-6791/vulnerable/repo
+	url = https://github.com/KDE/plasma-workspace.git
