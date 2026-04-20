@@ -36,3 +36,19 @@
 [submodule "cases/php__CVE-2015-8617/patched/repo"]
 	path = cases/php__CVE-2015-8617/patched/repo
 	url = https://github.com/php/php-src
+[submodule "cases/rsyslog__CVE-2017-12588/vulnerable/repo"]
+	path = cases/rsyslog__CVE-2017-12588/vulnerable/repo
+	url = https://github.com/rsyslog/rsyslog
+[submodule "cases/radare2__CVE-2019-16718/vulnerable/repo"]
+	path = cases/radare2__CVE-2019-16718/vulnerable/repo
+	url = https://github.com/radareorg/radare2
+[submodule "cases/rsyslog__CVE-2017-12588/patched/repo"]
+	path = cases/rsyslog__CVE-2017-12588/patched/repo
+	url = https://github.com/rsyslog/rsyslog
+	ignore = dirty
+[submodule "cases/plasma-workspace__CVE-2018-6791/patched/repo"]
+	path = cases/plasma-workspace__CVE-2018-6791/patched/repo
+	url = https://github.com/KDE/plasma-workspace.git
+[submodule "cases/plasma-workspace__CVE-2018-6791/vulnerable/repo"]
+	path = cases/plasma-workspace__CVE-2018-6791/vulnerable/repo
+	url = https://github.com/KDE/plasma-workspace.git
