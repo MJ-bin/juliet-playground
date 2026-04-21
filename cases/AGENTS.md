@@ -1,7 +1,8 @@
 # Cases Guidance
 
-이 문서는 `cases/<project>__<CVE>/vulnerable/trace_output/README.md` 작성 규칙을 다룹니다.
-중심은 **특정 취약점의 vulnerable trace를 어떻게 구성했는지**를 짧고 분명하게 설명하는 데 있습니다.
+이 문서는 `cases/<project>__<CVE>/{vulnerable,patched}/trace_output/README.md` 작성 규칙을 다룹니다.
+중심은 **특정 취약점의 trace를 어떻게 구성했는지**를 짧고 분명하게 설명하는 데 있습니다.
+patched-side README에서는 여기에 더해 **패치 전과 후가 어떻게 달라졌는지**를 짧고 분명하게 설명합니다.
 
 ## 작성 페르소나
 
@@ -17,9 +18,10 @@
 
 README 기본 순서는 아래와 같이 둡니다.
 1. `## 취약점 요약`
-2. `## 전체 vulnerable trace`
-3. `## vulnerable trace 구성 방식`
-4. `## fbinfer로 도출되지 않아 수동 분석한 구간`
+2. `(patched인 경우) ## patch 변경 사항`
+3. `## 전체 trace`
+4. `## trace 구성 방식`
+5. `## fbinfer로 도출되지 않아 수동 분석한 구간`
 
 ## 원칙 1. `## 취약점 요약`에는 프로젝트, 취약점, source, sink를 먼저 적습니다.
 
@@ -27,6 +29,8 @@ README 기본 순서는 아래와 같이 둡니다.
 - 취약점 이름은 `CWE-78`보다 `OS Command Injection`처럼 의미가 바로 드러나는 이름을 우선 사용합니다.
 - source, sink, middle은 가능한 한 함수 명으로 적습니다.
 - middle은 source와 sink 사이의 핵심 단계 1~2개만 둡니다.
+- patched-side README도 `## 취약점 요약`에서는 patched-side 기준의 source, middle, sink를 먼저 적습니다.
+- vulnerable-side와의 차이, 왜 더 이상 취약 조건이 성립하지 않는지는 바로 다음 `## patch 변경 사항`에서 설명합니다.
 
 ### 예제
 
@@ -40,22 +44,42 @@ README 기본 순서는 아래와 같이 둡니다.
 - sink: `system(x)`
 ```
 
-## 원칙 2. `## 전체 vulnerable trace`에는 현재 기준 전체 trace를 번호와 함께 둡니다.
+### patched-side 추가 규칙
+
+- patched-side README에서는 `## 취약점 요약` 바로 다음에 `## patch 변경 사항` 헤더를 추가합니다.
+- 이 섹션에서는 아래 순서로 적습니다.
+  1. 패치 전: vulnerable-side에서 어떤 호출 또는 경로가 문제였는지
+  2. 패치 후: 어떤 호출, 인자, 검증, 분기 방식으로 바뀌었는지
+  3. 해석: 그래서 vulnerable-side의 취약 조건이 왜 더 이상 성립하지 않는지
+- `패치 전`, `패치 후`, `해석` 각 항목은 각각 한 문장으로, 짧고 명확하게 작성합니다.
+- 이 섹션은 patch diff를 장황하게 나열하는 곳이 아니라, trace 해석에 필요한 변화만 짧게 요약하는 곳입니다.
+
+### 예제
+
+```md
+## patch 변경 사항
+
+- 패치 전: `snprintf(...)`로 shell command 문자열을 만든 뒤 `system(...)`에 넘겼다.
+- 패치 후: `xfers->save_dir`를 `argv[1]`에 담아 `g_spawn_async(...)`로 넘긴다.
+- 해석: 따라서 user-controlled value가 더 이상 shell command 문자열로 해석되지 않는다.
+```
+
+## 원칙 2. `## 전체 trace`에는 현재 기준 전체 trace를 번호와 함께 둡니다.
 
 - 근거: 구간 설명은 전체 trace가 먼저 보일 때 가장 잘 읽힙니다.
-- `## 전체 vulnerable trace`에는 현재 기준 전체 vulnerable trace를 두고, 각 step 앞에 `[1]`, `[2]`, `[3]`처럼 번호를 붙입니다.
-- 이 번호는 아래 `## vulnerable trace 구성 방식`과 `## fbinfer로 도출되지 않아 수동 분석한 구간`에서 그대로 사용합니다.
+- `## 전체 trace`에는 현재 기준 전체 trace를 두고, 각 step 앞에 `[1]`, `[2]`, `[3]`처럼 번호를 붙입니다.
+- 이 번호는 아래 `## trace 구성 방식`과 `## fbinfer로 도출되지 않아 수동 분석한 구간`에서 그대로 사용합니다.
 - 이 trace는 README를 작성하면서 함께 갱신합니다.
 - 각 step은 **해당 코드 라인을 생략 없이 전체 형태로 적습니다**.
 - 따라서 함수 호출의 인자 목록, 대입문의 반환 변수, 캐스팅, 구조체 필드 접근 등은 줄이지 않고 그대로 적습니다.
-- `## 전체 vulnerable trace`에서는 `@file:line` 형태의 anchor를 붙이지 않습니다.
+- `## 전체 trace`에서는 `@file:line` 형태의 anchor를 붙이지 않습니다.
   - line anchor는 아래 `## fbinfer로 도출되지 않아 수동 분석한 구간` 같은 설명 섹션에서 적습니다.
 - `...`로 줄이거나, 핵심 함수명만 남기거나, 앞뒤 표현을 임의로 생략한 형태는 쓰지 않습니다.
 
 ### 예제
 
 ~~~md
-## 전체 vulnerable trace
+## 전체 trace
 
 ```c
 [1] udscs_do_read(&conn);
@@ -67,19 +91,19 @@ README 기본 순서는 아래와 같이 둡니다.
 ```
 ~~~
 
-## 원칙 3. `## vulnerable trace 구성 방식`은 구간 trace 도출 방식과 근거를 표로 적습니다.
+## 원칙 3. `## trace 구성 방식`은 구간 trace 도출 방식과 근거를 표로 적습니다.
 
 - 근거: 전체 trace는 `fbinfer`가 바로 주는 한 개의 trace보다, 여러 구간 trace와 수동 분석을 합쳐 구성되는 경우가 많습니다.
 - 표는 아래 형식을 사용합니다.
 
-| 전체 vulnerable trace 기준 위치 | 구간 trace 도출 방식 | 근거 | 비고 |
+| 전체 trace 기준 위치 | 구간 trace 도출 방식 | 근거 | 비고 |
 | --- | --- | --- | --- |
 
-- `전체 vulnerable trace 기준 위치`와 `구간 trace 도출 방식` 값은 README에서 ``로 감싸지 않고 평문으로 적습니다.
+- `전체 trace 기준 위치`와 `구간 trace 도출 방식` 값은 README에서 ``로 감싸지 않고 평문으로 적습니다.
 - `구간 trace 도출 방식`은 아래 둘로 통일합니다.
   - fbinfer로 추출
   - 수동 분석
-- `전체 vulnerable trace 기준 위치`는 실제 연결 설명이 여러 단계여도 항상 출발지와 목적지만 적습니다.
+- `전체 trace 기준 위치`는 실제 연결 설명이 여러 단계여도 항상 출발지와 목적지만 적습니다.
   - 예: `1 -> 2 -> 3`으로 설명되는 구간도 표에는 `1 -> 3`으로 적습니다.
 - `fbinfer로 추출` 행의 근거에는 slice 파일의 상대 경로만 적습니다.
   - 예: `../runs/run-002/outputs/06_trace_slices/slice/slice_1f05e87c4707874c.c`
@@ -98,9 +122,9 @@ README 기본 순서는 아래와 같이 둡니다.
 ### 예제
 
 ```md
-## vulnerable trace 구성 방식
+## trace 구성 방식
 
-| 전체 vulnerable trace 기준 위치 | 구간 trace 도출 방식 | 근거 | 비고 |
+| 전체 trace 기준 위치 | 구간 trace 도출 방식 | 근거 | 비고 |
 | --- | --- | --- | --- |
 | 1 -> 2 | fbinfer로 추출 | `../runs/run-001/outputs/06_trace_slices/slice/slice_a1b2c3d4.c` | `../runs/run-001/outputs/03_signatures/infer-2026.04.14-14:28:35/signature-2026.04.14-14:28:42/non_empty/spice-vdagent/2.json` |
 | 2 -> 4 | 수동 분석 | 함수 포인터 필드의 concrete callee 복원 한계 | - |
@@ -157,3 +181,5 @@ README 기본 순서는 아래와 같이 둡니다.
   - `spice-vdagent__CVE-2017-15108/vulnerable/trace_output/README.md`
 - 중간 interpreter / dispatcher 단계가 중요한 흐름:
   - `radare2__CVE-2019-16718/vulnerable/trace_output/README.md`
+- patch 변경 사항과 patched trace 정리:
+  - `spice-vdagent__CVE-2017-15108/patched/trace_output/README.md`
