@@ -1,16 +1,5 @@
 file_name,unique_id,target,vulnerable_line_numbers,project,source_signature_path,commit_hash,dataset_type,processed_func
-1,1,1,"1,2,3",shadowsocks-libev,,,test,"r   = recvfrom(manager->fd, buf, BUF_SIZE, 0, (struct sockaddr *)&claddr, &len);
-        struct server *server = get_server(buf, r);
-  int ret = add_server(manager, server);
-   char *cmd = construct_command_line(manager, server);
-   if (server->method) method = server->method;
-    snprintf(cmd, BUF_SIZE,
-             '%s -m %s --manager-address %s -f %s/.shadowsocks_%s.pid -c %s/.shadowsocks_%s.conf`',
-             executable, method, manager->manager_address,
-             working_dir, server->port, working_dir, server->port);
-    if (system(cmd) == -1) {
-"
-2,2,1,"1,2,3",patch,,,test,"outfile = xstrdup (optarg);
+1,1,1,"1",patch,,,test,"outfile = xstrdup (optarg);
 outname = outfile;
 outfd = make_tempfile (&TMPOUTNAME, 'o', outname, O_WRONLY | binary_transput, instat.st_mode & S_IRWXUGO);
 int make_tempfile (char const **name, char letter, char const *real_name, int flags, mode_t mode)
@@ -22,7 +11,7 @@ void do_ed_script (char const *inname, char const *outname, bool *outname_needs_
 sprintf (buf, '%s %s%s', editor_program, verbosity == VERBOSE ? '' : '- ', outname);
 execl ('/bin/sh', 'sh', '-c', buf, (char *) 0);
 "
-3,3,0,,patch,,,test,"outfile = xstrdup (optarg);
+2,2,0,,patch,,,test,"outfile = xstrdup (optarg);
 outname = outfile;
 outfd = make_tempfile (&TMPOUTNAME, 'o', outname, O_WRONLY | binary_transput, instat.st_mode & S_IRWXUGO);
 int make_tempfile (char const **name, char letter, char const *real_name, int flags, mode_t mode)
@@ -33,7 +22,7 @@ do_ed_script (inname, TMPOUTNAME, &TMPOUTNAME_needs_removal, outstate.ofp);
 void do_ed_script (char const *inname, char const *outname, bool *outname_needs_removal, FILE *ofp)
 execlp (editor_program, editor_program, '-', outname, (char  *) NULL);
 "
-4,4,1,"1,2,3",php-src,,,test,"
+3,3,1,"1",php-src,,,test,"
 zend_throw_or_error(fetch_type, NULL, ""Class '%s' not found"", ZSTR_VAL(class_name));
 static void zend_throw_or_error(int fetch_type, zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
@@ -41,7 +30,7 @@ zend_throw_error(exception_ce, message);
 ZEND_API ZEND_COLD void zend_throw_error(zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
 "
-5,5,0,,php-src,,,test,"
+4,4,0,,php-src,,,test,"
 zend_throw_or_error(fetch_type, NULL, ""Class '%s' not found"", ZSTR_VAL(class_name));
 static void zend_throw_or_error(int fetch_type, zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
@@ -49,7 +38,7 @@ zend_throw_error(exception_ce, ""%s"", message);
 ZEND_API ZEND_COLD void zend_throw_error(zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
 "
-6,6,1,"1,2,3,4,5,6",vd_agent,,,test,"
+5,5,1,"1",vd_agent,,,test,"
 udscs_do_read(&conn);
 static void udscs_do_read(struct udscs_connection **conp)
 udscs_read_complete(connp);
@@ -63,7 +52,7 @@ void vdagent_file_xfers_data(struct vdagent_file_xfers *xfers, VDAgentFileXferDa
 snprintf(buf, PATH_MAX, ""xdg-open '%s'&"", xfers->save_dir);
 status = system(buf);
 "
-7,7,0,,vd_agent,,,test,"
+6,6,0,,vd_agent,,,test,"
 udscs_do_read(&conn);
 static void udscs_do_read(struct udscs_connection **conp)
 udscs_read_complete(connp);
@@ -77,7 +66,78 @@ void vdagent_file_xfers_data(struct vdagent_file_xfers *xfers, VDAgentFileXferDa
 gchar *argv[] = { ""xdg-open"", xfers->save_dir, NULL };
 if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error))
 "
-8,8,1,"1,2",openjpeg,,e7640f5,test,"
+7,7,1,"1",php-src,,,test,"
+size_t len = php_stream_read(s, buf, SAPI_POST_HANDLER_BUFSIZ);
+smart_str_appendl(&post_data.str, buf, len);
+if (SUCCESS != add_post_vars(arr, &post_data, 0 TSRMLS_CC)) {
+static inline int add_post_vars(zval *arr, post_var_data_t *vars, zend_bool eof)
+while (add_post_var(arr, vars, eof TSRMLS_CC)) {
+static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
+vsep = memchr(var->ptr, '&', var->end - var->ptr);
+"
+8,8,0,,php-src,,,test,"
+size_t len = php_stream_read(s, buf, SAPI_POST_HANDLER_BUFSIZ);
+smart_str_appendl(&post_data.str, buf, len);
+if (SUCCESS != add_post_vars(arr, &post_data, 0 TSRMLS_CC)) {
+static inline int add_post_vars(zval *arr, post_var_data_t *vars, zend_bool eof)
+while (add_post_var(arr, vars, eof TSRMLS_CC)) {
+static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
+start = var->ptr + var->already_scanned;
+vsep = memchr(start, '&', var->end - start);
+"
+9,9,1,"1",rsyslog,,,test,"
+CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
+CHKiRet(actionCallDoAction(pThis, actParams, pWti));
+iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+iRet = writeZMQ(ppString[0], pData);
+CHKiRet(initZMQ(pData));
+if(-1 == zsocket_bind(pData->socket, (char*)pData->description)) {
+"
+10,10,0,,rsyslog,,,test,"
+CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
+CHKiRet(actionCallDoAction(pThis, actParams, pWti));
+iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+iRet = writeZMQ(ppString[0], pData);
+CHKiRet(initZMQ(pData));
+if(-1 == zsocket_bind(pData->socket, ""%s"", (char*)pData->description)) {
+"
+11,11,1,"1",plasma-workspace,,"fc9b8df",test,"
+void SolidUiServer::showActionsDialog(const QString &udi, const QStringList &desktopFiles)
+foreach (const QString &desktop, desktopFiles) {
+const QString filePath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, ""solid/actions/""+desktop)
+QList<KServiceAction> services = KDesktopFileActions::userDefinedServices(filePath, true);
+foreach (const KServiceAction &service, services) {
+action->setService(service);
+m_service = service;
+new DelayedExecutor(m_service, device);
+DelayedExecutor::DelayedExecutor(const KServiceAction &service, Solid::Device &device): m_service(service)
+QString exec = m_service.exec();
+mx.expandMacros(exec);
+KRun::runCommand(exec, QString(), m_service.icon(), 0);
+"
+12,12,0,,plasma-workspace,,9db872d,test,"
+void SolidUiServer::showActionsDialog(const QString &udi, const QStringList &desktopFiles)
+foreach (const QString &desktop, desktopFiles) {
+const QString filePath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, ""solid/actions/""+desktop)
+QList<KServiceAction> services = KDesktopFileActions::userDefinedServices(filePath, true);
+foreach (const KServiceAction &service, services) {
+action->setService(service);
+m_service = service;
+new DelayedExecutor(m_service, device);
+DelayedExecutor::DelayedExecutor(const KServiceAction &service, Solid::Device &device): m_service(service)
+QString exec = m_service.exec();
+mx.expandMacrosShellQuote(exec);
+KRun::runCommand(exec, QString(), m_service.icon(), 0);
+"
+13,13,1,"1,2,3",shadowsocks-libev,,,test,"r   = recvfrom(manager->fd, buf, BUF_SIZE, 0, (struct sockaddr *)&claddr, &len);
+struct server *server = get_server(buf, r);
+int ret = add_server(manager, server);
+char *cmd = construct_command_line(manager, server);
+if (server->method) method = server->method;
+snprintf(cmd, BUF_SIZE, '%s -m %s --manager-address %s -f %s/.shadowsocks_%s.pid -c %s/.shadowsocks_%s.conf`', executable, method, manager->manager_address, working_dir, server->port, working_dir, server->port);
+if (system(cmd) == -1) {
+"
+14,14,1,"1,2",openjpeg,,e7640f5,test,"
 image = bmptoimage(parameters.infile, &parameters);
 opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
 IN = fopen(filename, ""rb"");
@@ -110,26 +170,7 @@ for (precno = 0; precno < res->pw * res->ph; ++precno) {
 opj_tcd_precinct_t *prc = &band->precincts[precno];
 for (cblkno = 0; cblkno < prc->cw * prc->ch; ++cblkno) {
 "
-10,10,1,"1,2",php-src,,0e21d80,test,"
-size_t len = php_stream_read(s, buf, SAPI_POST_HANDLER_BUFSIZ);
-smart_str_appendl(&post_data.str, buf, len);
-if (SUCCESS != add_post_vars(arr, &post_data, 0 TSRMLS_CC)) {
-static inline int add_post_vars(zval *arr, post_var_data_t *vars, zend_bool eof)
-while (add_post_var(arr, vars, eof TSRMLS_CC)) {
-static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
-vsep = memchr(var->ptr, '&', var->end - var->ptr);
-"
-11,11,0,,php-src,,0f8cf3b,test,"
-size_t len = php_stream_read(s, buf, SAPI_POST_HANDLER_BUFSIZ);
-smart_str_appendl(&post_data.str, buf, len);
-if (SUCCESS != add_post_vars(arr, &post_data, 0 TSRMLS_CC)) {
-static inline int add_post_vars(zval *arr, post_var_data_t *vars, zend_bool eof)
-while (add_post_var(arr, vars, eof TSRMLS_CC)) {
-static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
-start = var->ptr + var->already_scanned;
-vsep = memchr(start, '&', var->end - start);
-"
-12,12,1,"1",radare2,,,test,"
+15,15,1,"1",radare2,,,test,"
 RList *symbols = r_bin_get_symbols (r->bin);
 r_list_foreach (symbols, iter, symbol) {
 char *r_symbol_name = r_str_escape_utf8 (symbol->name, false, true);
@@ -169,51 +210,7 @@ return r_sandbox_system (str, 1);
 R_API int r_sandbox_system (const char *x, int n) {
 return system (x);
 "
-13,13,1,"1",rsyslog,,,test,"
-CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
-CHKiRet(actionCallDoAction(pThis, actParams, pWti));
-iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
-iRet = writeZMQ(ppString[0], pData);
-CHKiRet(initZMQ(pData));
-if(-1 == zsocket_bind(pData->socket, (char*)pData->description)) {
-"
-14,14,0,,rsyslog,,,test,"
-CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
-CHKiRet(actionCallDoAction(pThis, actParams, pWti));
-iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
-iRet = writeZMQ(ppString[0], pData);
-CHKiRet(initZMQ(pData));
-if(-1 == zsocket_bind(pData->socket, ""%s"", (char*)pData->description)) {
-"
-15,15,1,"1",plasma-workspace,,"fc9b8df",test,"
-void SolidUiServer::showActionsDialog(const QString &udi, const QStringList &desktopFiles)
-foreach (const QString &desktop, desktopFiles) {
-const QString filePath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, ""solid/actions/""+desktop)
-QList<KServiceAction> services = KDesktopFileActions::userDefinedServices(filePath, true);
-foreach (const KServiceAction &service, services) {
-action->setService(service);
-m_service = service;
-new DelayedExecutor(m_service, device);
-DelayedExecutor::DelayedExecutor(const KServiceAction &service, Solid::Device &device): m_service(service)
-QString exec = m_service.exec();
-mx.expandMacros(exec);
-KRun::runCommand(exec, QString(), m_service.icon(), 0);
-"
-16,16,0,,plasma-workspace,,9db872d,test,"
-void SolidUiServer::showActionsDialog(const QString &udi, const QStringList &desktopFiles)
-foreach (const QString &desktop, desktopFiles) {
-const QString filePath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, ""solid/actions/""+desktop)
-QList<KServiceAction> services = KDesktopFileActions::userDefinedServices(filePath, true);
-foreach (const KServiceAction &service, services) {
-action->setService(service);
-m_service = service;
-new DelayedExecutor(m_service, device);
-DelayedExecutor::DelayedExecutor(const KServiceAction &service, Solid::Device &device): m_service(service)
-QString exec = m_service.exec();
-mx.expandMacrosShellQuote(exec);
-KRun::runCommand(exec, QString(), m_service.icon(), 0);
-"
-17,17,1,"1",ghostpdl,,0edd3d6c6,test,"
+16,16,1,"1",ghostpdl,,0edd3d6c6,test,"
 int gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
 gx_device_printer * const ppdev = (gx_device_printer *)pdev;
 switch (code = param_read_string(plist, (param_name = ""OutputFile""), &ofs)) {
