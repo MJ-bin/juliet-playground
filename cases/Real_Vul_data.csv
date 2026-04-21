@@ -85,12 +85,6 @@ if (!bmp_read_info_header(IN, &Info_h)) {
 static OPJ_BOOL bmp_read_info_header(FILE* IN, OPJ_BITMAPINFOHEADER* header)
 header->biWidth  = (OPJ_UINT32)getc(IN);
 l_result = bmp_read_rle8_data(IN, pData, stride, Info_h.biWidth,
-static OPJ_BOOL bmp_read_rle8_data(FILE* IN, OPJ_UINT8* pData,
-pix = pData;
-for (j = 0; (j < c) && (x < width) &&
-c1_int = getc(IN);
-c1 = (OPJ_UINT8)c1_int;
-*pix = c1;
 bmp8toimage(pData, stride, image, pLUT);
 bSuccess = opj_start_compress(l_codec, image, l_stream);
 if (! opj_write_tile(l_codec, i, l_data, l_data_size, l_stream)) {
@@ -115,24 +109,6 @@ opj_tcd_band_t* OPJ_RESTRICT band = &res->bands[bandno];
 for (precno = 0; precno < res->pw * res->ph; ++precno) {
 opj_tcd_precinct_t *prc = &band->precincts[precno];
 for (cblkno = 0; cblkno < prc->cw * prc->ch; ++cblkno) {
-"
-9,9,0,,openjpeg,,8ee3352,test,"
-image = bmptoimage(parameters.infile, &parameters);
-opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
-IN = fopen(filename, ""rb"");
-if (!bmp_read_info_header(IN, &Info_h)) {
-static OPJ_BOOL bmp_read_info_header(FILE* IN, OPJ_BITMAPINFOHEADER* header)
-header->biWidth  = (OPJ_UINT32)getc(IN);
-l_result = bmp_read_rle8_data(IN, pData, stride, Info_h.biWidth,
-static OPJ_BOOL bmp_read_rle8_data(FILE* IN, OPJ_UINT8* pData,
-pix = pData;
-x = y = written = 0U;
-for (j = 0; (j < c) && (x < width) &&
-c1_int = getc(IN);
-c1 = (OPJ_UINT8)c1_int;
-*pix = c1;
-written++;
-if (written != width * height) { return OPJ_FALSE; }
 "
 10,10,1,"1,2",php-src,,0e21d80,test,"
 size_t len = php_stream_read(s, buf, SAPI_POST_HANDLER_BUFSIZ);
