@@ -31,6 +31,8 @@ DEFAULT_CUDA_DEVICE = 0
 PRIMARY_TARGET_NAME = 'primary'
 VULN_PATCH_TARGET_NAME = 'vuln_patch'
 EXTENDED_REALVUL_TARGET_NAME = EXTENDED_REALVUL_NAMESPACE
+CVE_TRACE_PAIR_TARGET_NAME = 'cve_trace_pair'
+CVE_TRACE_PAIR_SOURCE_CSV = Path(__file__).resolve().parent.parent / 'cases' / 'Real_Vul_data.csv'
 AFTER_FINE_TUNED_TARGET_NAME = 'after_fine_tuned'
 BEFORE_FINE_TUNED_TARGET_NAME = 'before_fine_tuned'
 EXTENDED_REALVUL_DATASET_NAME = 'all_projects_vul_patch_dataset.csv'
@@ -73,6 +75,7 @@ class PDBERTRunConfig:
     container_name: str
     raw_model_dir: Path | None
     extended_realvul: bool
+    cve_trace_pair: bool
     overwrite: bool
     dry_run: bool
 
@@ -165,6 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--container-name', type=str, default=DEFAULT_CONTAINER_NAME)
     parser.add_argument('--raw-model-dir', type=Path, default=DEFAULT_RAW_MODEL_DIR)
     parser.add_argument('--extended-realvul', action='store_true')
+    parser.add_argument('--cve-trace-pair', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     return parser.parse_args()
@@ -178,6 +182,7 @@ def normalize_config(config: PDBERTRunConfig) -> PDBERTRunConfig:
         container_name=config.container_name,
         raw_model_dir=config.raw_model_dir.resolve() if config.raw_model_dir is not None else None,
         extended_realvul=config.extended_realvul,
+        cve_trace_pair=config.cve_trace_pair,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
     )
@@ -186,6 +191,8 @@ def normalize_config(config: PDBERTRunConfig) -> PDBERTRunConfig:
 def validate_config(config: PDBERTRunConfig) -> None:
     if not config.vpbench_root.exists():
         raise ValueError(f'VP-Bench root not found: {config.vpbench_root}')
+    if config.cve_trace_pair and config.extended_realvul:
+        raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
     if not config.extended_realvul and config.run_dir is None and not config.pipeline_root.exists():
         raise ValueError(f'Pipeline root not found: {config.pipeline_root}')
     if config.raw_model_dir is not None and not config.raw_model_dir.exists():
@@ -220,6 +227,8 @@ def _target_output_relative_parts(target_name: str) -> tuple[str, ...]:
         return (PRIMARY_TARGET_NAME,)
     if target_name == VULN_PATCH_TARGET_NAME:
         return (VULN_PATCH_TARGET_NAME,)
+    if target_name == CVE_TRACE_PAIR_TARGET_NAME:
+        return (CVE_TRACE_PAIR_TARGET_NAME,)
     raise ValueError(f'Unsupported PDBERT target: {target_name}')
 
 
@@ -228,6 +237,8 @@ def _target_dataset_relative_parts(target_name: str) -> tuple[str, ...]:
         return (PRIMARY_TARGET_NAME, 'vpbench', 'Real_Vul')
     if target_name == VULN_PATCH_TARGET_NAME:
         return (VULN_PATCH_TARGET_NAME, 'realvul_test', 'Real_Vul')
+    if target_name == CVE_TRACE_PAIR_TARGET_NAME:
+        return (CVE_TRACE_PAIR_TARGET_NAME, 'realvul_test', 'Real_Vul')
     raise ValueError(f'Unsupported PDBERT target: {target_name}')
 
 
@@ -240,15 +251,23 @@ def _target_requires_training(target_name: str) -> bool:
 
 
 def _target_supports_raw_eval(target_name: str) -> bool:
-    return target_name in {VULN_PATCH_TARGET_NAME, EXTENDED_REALVUL_TARGET_NAME}
+    return target_name in {
+        VULN_PATCH_TARGET_NAME,
+        CVE_TRACE_PAIR_TARGET_NAME,
+        EXTENDED_REALVUL_TARGET_NAME,
+    }
 
 
 def _target_uses_reused_model(target_name: str) -> bool:
-    return target_name == VULN_PATCH_TARGET_NAME
+    return target_name in {VULN_PATCH_TARGET_NAME, CVE_TRACE_PAIR_TARGET_NAME}
 
 
 def _target_uses_downloaded_model(target_name: str) -> bool:
     return _is_extended_realvul_target(target_name)
+
+
+def _target_supports_combined_tsne(target_name: str) -> bool:
+    return target_name in {CVE_TRACE_PAIR_TARGET_NAME, EXTENDED_REALVUL_TARGET_NAME}
 
 
 def _required_dataset_types_for_target(target_name: str) -> tuple[str, ...]:
@@ -330,53 +349,21 @@ def build_pdbert_paths(
         )
         container_output_dir = CONTAINER_MODEL_BASE / EXTENDED_REALVUL_NAMESPACE
         run_dir = source_csv.parent
-    elif target_name == PRIMARY_TARGET_NAME:
-        dataset_paths = build_dataset_export_paths(run_dir / '07_dataset_export')
-        source_csv = dataset_paths['csv_path']
+    elif target_name in {PRIMARY_TARGET_NAME, VULN_PATCH_TARGET_NAME, CVE_TRACE_PAIR_TARGET_NAME}:
+        if target_name == PRIMARY_TARGET_NAME:
+            dataset_paths = build_dataset_export_paths(run_dir / '07_dataset_export')
+            source_csv = dataset_paths['csv_path']
+        elif target_name == VULN_PATCH_TARGET_NAME:
+            source_csv = run_dir / '07_dataset_export' / 'vuln_patch' / 'Real_Vul_data.csv'
+        else:
+            source_csv = CVE_TRACE_PAIR_SOURCE_CSV
+
         dataset_relative_parts = _target_dataset_relative_parts(target_name)
         output_relative_parts = _target_output_relative_parts(target_name)
         run_name = run_dir.name
         display_name = (
             run_name if target_name == PRIMARY_TARGET_NAME else f'{run_name}/{target_name}'
         )
-        task_name = f'vul_detect/{JULIET_PDBERT_NAMESPACE}/{run_name}/{target_name}'
-
-        base_host_dataset_dir = (
-            config.vpbench_root
-            / 'downloads'
-            / 'PDBERT'
-            / 'data'
-            / 'datasets'
-            / 'extrinsic'
-            / 'vul_detect'
-            / JULIET_PDBERT_NAMESPACE
-            / run_name
-        )
-        base_host_output_dir = (
-            config.vpbench_root
-            / 'downloads'
-            / 'PDBERT'
-            / 'data'
-            / 'models'
-            / 'extrinsic'
-            / 'vul_detect'
-            / JULIET_PDBERT_NAMESPACE
-            / run_name
-        )
-        host_dataset_dir = base_host_dataset_dir.joinpath(*dataset_relative_parts)
-        host_output_dir = base_host_output_dir.joinpath(*output_relative_parts)
-        container_dataset_dir = (
-            CONTAINER_DATASET_BASE / JULIET_PDBERT_NAMESPACE / run_name
-        ).joinpath(*dataset_relative_parts)
-        container_output_dir = (CONTAINER_MODEL_BASE / JULIET_PDBERT_NAMESPACE / run_name).joinpath(
-            *output_relative_parts
-        )
-    elif target_name == VULN_PATCH_TARGET_NAME:
-        source_csv = run_dir / '07_dataset_export' / 'vuln_patch' / 'Real_Vul_data.csv'
-        dataset_relative_parts = _target_dataset_relative_parts(target_name)
-        output_relative_parts = _target_output_relative_parts(target_name)
-        run_name = run_dir.name
-        display_name = f'{run_name}/{target_name}'
         task_name = f'vul_detect/{JULIET_PDBERT_NAMESPACE}/{run_name}/{target_name}'
 
         base_host_dataset_dir = (
@@ -1178,6 +1165,10 @@ def print_planned_commands(
             print(
                 f'Target [{paths.target_name}] Container raw model dir: {paths.container_raw_model_dir}'
             )
+            if _target_supports_combined_tsne(paths.target_name):
+                combined_image, combined_cache = combined_feature_artifact_paths(paths)
+                print(f'Target [{paths.target_name}] Combined t-SNE image: {combined_image}')
+                print(f'Target [{paths.target_name}] Combined t-SNE cache: {combined_cache}')
             if raw_model_source_type == RAW_MODEL_SOURCE_PRETRAINED_BACKBONE:
                 print(
                     f'Target [{paths.target_name}] Host raw pretrained source dir: '
@@ -1225,7 +1216,7 @@ def print_completion_summary(
             print(f'  - [{paths.target_name}] raw_analysis_json: {paths.host_raw_analysis_json}')
             print(f'  - [{paths.target_name}] raw_feature_npz: {paths.host_raw_feature_npz}')
             print(f'  - [{paths.target_name}] raw_tsne_image: {paths.host_raw_feature_tsne_image}')
-        if _is_extended_realvul_target(paths.target_name):
+        if _target_supports_combined_tsne(paths.target_name):
             combined_image, combined_cache = combined_feature_artifact_paths(paths)
             print(f'  - [{paths.target_name}] combined_tsne_image: {combined_image}')
             print(f'  - [{paths.target_name}] combined_tsne_cache: {combined_cache}')
@@ -1279,7 +1270,7 @@ def _require_raw_analysis_outputs(paths: PDBERTPaths) -> None:
     require_exists(paths.host_raw_eval_result_csv, 'raw_model_eval/eval_result.csv')
     require_exists(paths.host_raw_analysis_json, 'raw_model_eval/prediction_analysis.json')
     require_exists(paths.host_raw_feature_npz, 'raw_model_eval/test_last_hidden_state_vectors.npz')
-    if _is_extended_realvul_target(paths.target_name):
+    if _target_supports_combined_tsne(paths.target_name):
         combined_image, combined_cache = combined_feature_artifact_paths(paths)
         require_exists(combined_image, 'combined_test_last_hidden_state_vectors.jpeg')
         require_exists(
@@ -1422,6 +1413,54 @@ def _run_target_pipeline(
         _run_analyze_phase(config, commands, paths, phase='raw_analyze')
 
 
+def run_pdbert_cve_trace_pair(config: PDBERTRunConfig) -> int:
+    validate_config(config)
+    if config.raw_model_dir is None:
+        raise ValueError('Raw PDBERT model dir is required when --cve-trace-pair is set')
+
+    run_dir = resolve_run_dir(config)
+    primary_paths = build_pdbert_paths(config, run_dir, target_name=PRIMARY_TARGET_NAME)
+    cve_trace_pair_paths = build_pdbert_paths(
+        config,
+        run_dir,
+        target_name=CVE_TRACE_PAIR_TARGET_NAME,
+    )
+    raw_model_source_type = validate_raw_model_dir(config.raw_model_dir)
+
+    validate_paths(cve_trace_pair_paths, raw_model_source_type=raw_model_source_type)
+    validate_stage07_csv(
+        cve_trace_pair_paths.source_csv,
+        required_dataset_types=TEST_ONLY_REQUIRED_DATASET_TYPES,
+    )
+    require_model_artifacts(primary_paths.host_output_dir, label='primary model')
+    ensure_output_targets([cve_trace_pair_paths], overwrite=config.overwrite)
+    commands = build_command_steps(config, [cve_trace_pair_paths])
+
+    if config.dry_run:
+        print_planned_commands(config, commands, [cve_trace_pair_paths])
+        return 0
+
+    check_container_running(config.container_name)
+    if config.overwrite:
+        cleanup_output_targets([cve_trace_pair_paths], container_name=config.container_name)
+
+    stage_source_csv(cve_trace_pair_paths)
+    stage_runtime_configs(cve_trace_pair_paths)
+    _run_target_pipeline(
+        config,
+        commands,
+        cve_trace_pair_paths,
+        primary_paths=primary_paths,
+        raw_model_source_type=raw_model_source_type,
+    )
+
+    print_completion_summary(
+        [cve_trace_pair_paths],
+        raw_model_source_type=raw_model_source_type,
+    )
+    return 0
+
+
 def run_pdbert_from_pipeline(config: PDBERTRunConfig) -> int:
     validate_config(config)
     run_dir = config.vpbench_root if config.extended_realvul else resolve_run_dir(config)
@@ -1485,11 +1524,14 @@ def main() -> int:
             container_name=args.container_name,
             raw_model_dir=args.raw_model_dir,
             extended_realvul=args.extended_realvul,
+            cve_trace_pair=args.cve_trace_pair,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
         )
     )
     try:
+        if config.cve_trace_pair:
+            return run_pdbert_cve_trace_pair(config)
         if config.extended_realvul:
             return run_extended_realvul_eval(config)
         return run_pdbert_from_pipeline(config)

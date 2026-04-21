@@ -236,6 +236,7 @@ def test_run_pdbert_stages_csv_configs_and_runs_primary_pipeline(tmp_path, monke
             container_name='pdbert',
             raw_model_dir=None,
             extended_realvul=False,
+            cve_trace_pair=False,
             overwrite=False,
             dry_run=False,
         )
@@ -336,6 +337,7 @@ def test_run_pdbert_prepares_python38_compatible_analyze_script(tmp_path):
             container_name='pdbert',
             raw_model_dir=None,
             extended_realvul=False,
+            cve_trace_pair=False,
             overwrite=False,
             dry_run=False,
         )
@@ -499,6 +501,7 @@ def test_run_pdbert_extended_realvul_executes_after_and_before_eval(tmp_path, mo
             container_name='pdbert',
             raw_model_dir=None,
             extended_realvul=True,
+            cve_trace_pair=False,
             overwrite=False,
             dry_run=False,
         )
@@ -623,3 +626,417 @@ def test_run_pdbert_extended_realvul_executes_after_and_before_eval(tmp_path, mo
     assert not (model_root / '_before_fine_tuned_runtime').exists()
     assert not (model_root / 'before_fine_tuned').exists()
     assert pretrained_model_dir.exists()
+
+
+def test_run_pdbert_cve_trace_pair_dry_run_prints_fine_tuned_and_raw_eval_steps(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_dry_run',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _make_raw_model_archive_dir(
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'primary'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert '[cve_trace_pair/prepare]' in captured.out
+    assert '[cve_trace_pair/test]' in captured.out
+    assert '[cve_trace_pair/analyze]' in captured.out
+    assert '[cve_trace_pair/raw_test]' in captured.out
+    assert '[cve_trace_pair/raw_analyze]' in captured.out
+    assert 'combined_test_last_hidden_state_vectors' in captured.out
+    assert '[primary/train]' not in captured.out
+    assert '[vuln_patch/prepare]' not in captured.out
+
+
+def test_run_pdbert_cve_trace_pair_executes_fine_tuned_and_raw_compare(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_execute',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+
+    primary_output_dir = (
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'primary'
+    )
+    _make_raw_model_archive_dir(primary_output_dir)
+
+    config = module.normalize_config(
+        module.PDBERTRunConfig(
+            run_dir=run_dir,
+            pipeline_root=tmp_path / 'pipeline-runs',
+            vpbench_root=vpbench_root,
+            container_name='pdbert',
+            raw_model_dir=raw_model_dir,
+            extended_realvul=False,
+            cve_trace_pair=True,
+            overwrite=False,
+            dry_run=False,
+        )
+    )
+    cve_paths = module.build_pdbert_paths(
+        config,
+        run_dir,
+        target_name=module.CVE_TRACE_PAIR_TARGET_NAME,
+    )
+    raw_setup_log = module.raw_model_setup_log_path(cve_paths)
+    combined_tsne_image, combined_tsne_cache = module.combined_feature_artifact_paths(cve_paths)
+
+    commands: list[tuple[list[str], Path]] = []
+    copied_analyze_scripts: list[str] = []
+    copied_raw_scripts: list[str] = []
+
+    def fake_run_logged_command(command, log_path):
+        commands.append((list(command), log_path))
+        write_text(log_path, '$ ' + ' '.join(command) + '\n')
+        if log_path == cve_paths.host_prepare_log:
+            assert cve_paths.host_model_config_json.exists()
+            assert cve_paths.host_model_archive.exists()
+            write_text(cve_paths.host_test_json, '{}\n')
+        elif log_path == cve_paths.host_analyze_log:
+            write_text(cve_paths.host_eval_result_csv, 'metric,value\nf1,0.9\n')
+            write_text(cve_paths.host_analysis_json, '{}\n')
+            write_text(cve_paths.host_feature_npz, 'after npz\n')
+        elif log_path == raw_setup_log:
+            assert (cve_paths.host_raw_model_dir / module.RAW_PRETRAINED_SOURCE_DIRNAME).exists()
+            write_text(cve_paths.host_raw_model_config_json, '{}\n')
+            write_text(cve_paths.host_raw_model_archive, 'before-model\n')
+        elif log_path == cve_paths.host_raw_analyze_log:
+            write_text(cve_paths.host_raw_eval_result_csv, 'metric,value\nf1,0.7\n')
+            write_text(cve_paths.host_raw_analysis_json, '{}\n')
+            write_text(cve_paths.host_raw_feature_npz, 'raw npz\n')
+            write_text(combined_tsne_image, 'combined image\n')
+            write_text(combined_tsne_cache, '{}\n')
+
+    monkeypatch.setattr(module, 'check_container_running', lambda _container_name: None)
+    monkeypatch.setattr(module, 'run_logged_command', fake_run_logged_command)
+    monkeypatch.setattr(
+        module,
+        'copy_analyze_script_to_container',
+        lambda paths, container_name: copied_analyze_scripts.append(
+            f'{paths.display_name}:{container_name}'
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        'copy_raw_baseline_script_to_container',
+        lambda paths, container_name: copied_raw_scripts.append(
+            f'{paths.display_name}:{container_name}'
+        ),
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+        ],
+    )
+
+    assert result == 0
+    assert [log_path for _, log_path in commands] == [
+        cve_paths.host_prepare_log,
+        cve_paths.host_test_log,
+        cve_paths.host_analyze_log,
+        raw_setup_log,
+        cve_paths.host_raw_test_log,
+        cve_paths.host_raw_analyze_log,
+    ]
+    assert copied_analyze_scripts == [
+        'run-demo/cve_trace_pair:pdbert',
+        'run-demo/cve_trace_pair:pdbert',
+    ]
+    assert copied_raw_scripts == ['run-demo/cve_trace_pair:pdbert']
+    assert cve_paths.host_dataset_csv.read_text(encoding='utf-8') == cve_csv.read_text(
+        encoding='utf-8'
+    )
+    assert cve_paths.host_model_config_json.exists()
+    assert cve_paths.host_model_archive.exists()
+    assert (
+        cve_paths.host_raw_model_dir / module.RAW_PRETRAINED_SOURCE_DIRNAME / 'config.json'
+    ).exists()
+    assert (cve_paths.host_raw_model_dir / 'model.tar.gz').exists()
+    assert (cve_paths.host_raw_model_dir / 'config.json').exists()
+    assert cve_paths.host_raw_feature_npz.exists()
+    assert combined_tsne_image.exists()
+    assert combined_tsne_cache.exists()
+    assert not cve_paths.host_train_log.exists()
+
+
+def test_run_pdbert_cve_trace_pair_fails_when_primary_model_is_missing(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_missing_primary_model',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert 'primary model/config.json' in captured.err
+
+
+def test_run_pdbert_cve_trace_pair_requires_overwrite_for_existing_target(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_existing_target',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _make_raw_model_archive_dir(
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'primary'
+    )
+    (
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'cve_trace_pair'
+    ).mkdir(parents=True, exist_ok=True)
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'use --overwrite to replace it' in captured.err
+
+
+def test_run_pdbert_cve_trace_pair_requires_fixed_dataset_csv(tmp_path, monkeypatch, capsys):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_missing_dataset',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    missing_csv = tmp_path / 'cases' / 'missing.csv'
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', missing_csv)
+    _make_raw_model_archive_dir(
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'primary'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'Stage 07 dataset CSV not found' in captured.err
+
+
+def test_run_pdbert_cve_trace_pair_requires_test_rows_in_fixed_dataset(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_missing_test_rows',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_stage07_csv(cve_csv, include_test_rows=False)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _make_raw_model_archive_dir(
+        vpbench_root
+        / 'downloads'
+        / 'PDBERT'
+        / 'data'
+        / 'models'
+        / 'extrinsic'
+        / 'vul_detect'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'primary'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'must contain test rows' in captured.err
+
+
+def test_run_pdbert_cve_trace_pair_rejects_extended_realvul_flag(tmp_path, capsys):
+    module = load_module_from_path(
+        'test_run_pdbert_cve_trace_pair_extended_realvul_conflict',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(
+        tmp_path / 'VP-Bench' / 'downloads' / 'PDBERT' / 'data' / 'models' / 'pdbert-base'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--extended-realvul',
+            '--cve-trace-pair',
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert '--cve-trace-pair cannot be used with --extended-realvul' in captured.err
