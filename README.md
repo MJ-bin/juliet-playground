@@ -283,6 +283,12 @@ python tools/run_linevul.py \
   --run-dir artifacts/pipeline-runs/run-2026.03.17-11:28:48 \
   --dry-run
 
+# 기존 primary best_model 과 raw baseline(--model-name) 을 비교해
+# 고정 CVE trace-pair CSV에 대해 fine-tuned test + raw_test + combined t-SNE 생성
+python tools/run_linevul.py \
+  --run-dir artifacts/pipeline-runs/run-2026.03.17-11:28:48 \
+  --cve-trace-pair
+
 # Extended RealVul 테스트셋과 fine-tuned LineVul 모델을 다운로드해
 # fine-tuned test -> raw baseline test -> combined t-SNE 까지 실행
 python tools/run_linevul.py \
@@ -308,6 +314,14 @@ python tools/run_pdbert.py \
   --raw-model-dir /home/sojeon/Desktop/VP-Bench/downloads/PDBERT/data/models/pdbert-base \
   --dry-run
 
+# 기존 primary fine-tuned model 과 raw baseline 을 비교해
+# 고정 CVE trace-pair CSV에 대해
+# fine-tuned test/analyze + raw_test/raw_analyze + combined t-SNE 생성
+python tools/run_pdbert.py \
+  --run-dir artifacts/pipeline-runs/run-2026.03.18-04:05:48 \
+  --raw-model-dir /home/sojeon/Desktop/VP-Bench/downloads/PDBERT/data/models/pdbert-base \
+  --cve-trace-pair
+
 # Extended RealVul 테스트셋과 fine-tuned PDBERT 모델을 다운로드해
 # fine-tuned test/analyze + raw baseline test/analyze + combined t-SNE 까지 실행
 python tools/run_pdbert.py \
@@ -330,6 +344,12 @@ python tools/compare-artifacts.py \
 - 같은 run에 `07_dataset_export/vuln_patch/Real_Vul_data.csv` 가 있으면
   primary dataset 학습이 끝난 뒤 같은 `best_model` 을 재사용해서
   vuln_patch dataset 에 대해 `prepare -> test` 를 추가로 실행합니다.
+- `--cve-trace-pair` 를 사용하면 pipeline Stage 07 CSV 대신
+  repo 고정 입력 `cases/Real_Vul_data.csv` 를 사용하고,
+  같은 run의 기존 primary `best_model` 을 재사용해서
+  `cve_trace_pair` target에 대해 `prepare -> test -> raw_test` 를 실행합니다.
+  raw baseline 비교 모델은 `--model-name` 값을 사용하며, fine-tuned vs raw combined t-SNE 도 함께 생성합니다.
+  이 모드에서는 `vuln_patch` 를 무시하고 `--extended-realvul` 과 함께 사용할 수 없습니다.
 - 기본 대상 경로:
   - VP-Bench root: `/home/sojeon/Desktop/VP-Bench`
   - container: `linevul`
@@ -342,6 +362,10 @@ python tools/compare-artifacts.py \
   - vuln_patch staging/output:
     `downloads/RealVul/datasets/juliet-playground/<run-id>/vuln_patch/`
     `baseline/RealVul/Experiments/LineVul/juliet-playground/<run-id>/vuln_patch/`
+  - cve_trace_pair staging/output:
+    `downloads/RealVul/datasets/juliet-playground/<run-id>/cve_trace_pair/`
+    `baseline/RealVul/Experiments/LineVul/juliet-playground/<run-id>/cve_trace_pair/`
+    `baseline/RealVul/Experiments/LineVul/juliet-playground/<run-id>/cve_trace_pair/raw_model_eval/`
 - 이 스크립트는 원본 `linevul_main.py` 대신 VP-Bench 커스텀 `line_vul.py` 를 사용합니다.
   현재 Stage 07 CSV 는 `processed_func`, `vulnerable_line_numbers`, `dataset_type` 기준으로는
   바로 사용할 수 있지만, 원본 `linevul_main.py` 가 기대하는
@@ -361,6 +385,13 @@ python tools/compare-artifacts.py \
 - `--raw-model-dir` 는 두 형식을 받습니다.
   - AllenNLP archive dir: `config.json`, `model.tar.gz`
   - pretrained backbone dir: `config.json`, `pytorch_model.bin`, tokenizer 자산
+- `--cve-trace-pair` 를 사용하면 pipeline Stage 07 CSV 대신
+  repo 고정 입력 `cases/Real_Vul_data.csv` 를 사용하고,
+  같은 run의 기존 primary `model.tar.gz` / `config.json` 을 재사용해서
+  `cve_trace_pair` target에 대해
+  `prepare -> test -> analyze -> raw_test -> raw_analyze` 를 실행합니다.
+  raw analyze 단계에서 fine-tuned vs raw combined t-SNE 도 함께 생성합니다.
+  이 모드에서는 `vuln_patch` 를 무시하고 `--extended-realvul` 과 함께 사용할 수 없습니다.
 - vuln_patch 가 있을 때는 다음이 추가됩니다.
   - 학습된 primary `model.tar.gz` / `config.json` 을 재사용해
     vuln_patch dataset 에 대해 `prepare -> test -> analyze`
@@ -384,8 +415,15 @@ python tools/compare-artifacts.py \
     `downloads/PDBERT/data/models/extrinsic/vul_detect/juliet-playground/<run-id>/vuln_patch/`
   - raw baseline output:
     `downloads/PDBERT/data/models/extrinsic/vul_detect/juliet-playground/<run-id>/vuln_patch/raw_model_eval/`
+  - cve_trace_pair staging/output:
+    `downloads/PDBERT/data/datasets/extrinsic/vul_detect/juliet-playground/<run-id>/cve_trace_pair/realvul_test/Real_Vul/`
+    `downloads/PDBERT/data/models/extrinsic/vul_detect/juliet-playground/<run-id>/cve_trace_pair/`
+    `downloads/PDBERT/data/models/extrinsic/vul_detect/juliet-playground/<run-id>/cve_trace_pair/raw_model_eval/`
 - feature export / t-SNE 산출물은 primary analyze, vuln_patch analyze,
-  raw baseline analyze 에서 각각 생성됩니다.
+  cve_trace_pair analyze, raw baseline analyze 에서 각각 생성됩니다.
+- cve_trace_pair 와 extended_realvul 의 raw baseline analyze 는
+  fine-tuned vs raw combined t-SNE 를
+  `combined_test_last_hidden_state_vectors.{jpeg,-tsne-features.json}` 로 추가 생성합니다.
 - `--extended-realvul` 을 사용하면 pipeline run 입력 대신
   VP-Bench release의 Extended RealVul 테스트 CSV와 PDBERT fine-tuned 모델을 내려받아
   fine-tuned test/analyze, raw baseline test/analyze, combined t-SNE 생성만 수행합니다.
