@@ -150,7 +150,11 @@ def _require_existing_input_path(label: str, path: Path) -> None:
 
 
 def _read_git_origin_url(repo_dir: Path) -> str | None:
-    git_config = repo_dir / '.git' / 'config'
+    git_dir = _resolve_git_dir(repo_dir)
+    if git_dir is None:
+        return None
+
+    git_config = git_dir / 'config'
     if not git_config.exists():
         return None
 
@@ -169,6 +173,23 @@ def _read_git_origin_url(repo_dir: Path) -> str | None:
         if match:
             return match.group('url')
     return None
+
+
+def _resolve_git_dir(repo_dir: Path) -> Path | None:
+    git_path = repo_dir / '.git'
+    if git_path.is_dir():
+        return git_path
+    if not git_path.is_file():
+        return None
+
+    raw = git_path.read_text(encoding='utf-8').strip()
+    if not raw.startswith('gitdir:'):
+        return None
+
+    git_dir = Path(raw.split(':', maxsplit=1)[1].strip())
+    if not git_dir.is_absolute():
+        git_dir = (repo_dir / git_dir).resolve()
+    return git_dir if git_dir.exists() else None
 
 
 def _project_name_from_git_url(raw_url: str) -> str:
