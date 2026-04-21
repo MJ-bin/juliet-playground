@@ -29,6 +29,8 @@ DEFAULT_NUM_TRAIN_EPOCHS = 10
 PRIMARY_TARGET_NAME = 'primary'
 VULN_PATCH_TARGET_NAME = 'vuln_patch'
 EXTENDED_REALVUL_TARGET_NAME = EXTENDED_REALVUL_NAMESPACE
+CVE_TRACE_PAIR_TARGET_NAME = 'cve_trace_pair'
+CVE_TRACE_PAIR_SOURCE_CSV = Path(__file__).resolve().parent.parent / 'cases' / 'Real_Vul_data.csv'
 TRAINING_LOSS_LOG_NAME = 'training_loss.log'
 TRAINING_LOSS_PLOT_NAME = 'train_loss_by_epoch.png'
 TRAIN_EPOCH_LOSS_PREFIX = 'TRAIN_EPOCH_LOSS '
@@ -66,6 +68,7 @@ class LineVulRunConfig:
     eval_batch_size: int
     num_train_epochs: int
     extended_realvul: bool
+    cve_trace_pair: bool
     overwrite: bool
     dry_run: bool
 
@@ -134,6 +137,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--eval-batch-size', type=int, default=DEFAULT_EVAL_BATCH_SIZE)
     parser.add_argument('--num-train-epochs', type=int, default=DEFAULT_NUM_TRAIN_EPOCHS)
     parser.add_argument('--extended-realvul', action='store_true')
+    parser.add_argument('--cve-trace-pair', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     return parser.parse_args()
@@ -151,6 +155,7 @@ def normalize_config(config: LineVulRunConfig) -> LineVulRunConfig:
         eval_batch_size=config.eval_batch_size,
         num_train_epochs=config.num_train_epochs,
         extended_realvul=config.extended_realvul,
+        cve_trace_pair=config.cve_trace_pair,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
     )
@@ -165,6 +170,8 @@ def validate_config(config: LineVulRunConfig) -> None:
         raise ValueError(f'eval_batch_size must be > 0: {config.eval_batch_size}')
     if config.num_train_epochs <= 0:
         raise ValueError(f'num_train_epochs must be > 0: {config.num_train_epochs}')
+    if config.cve_trace_pair and config.extended_realvul:
+        raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
     if config.extended_realvul and config.run_dir is not None:
         raise ValueError('--run-dir is not used with --extended-realvul')
 
@@ -334,6 +341,33 @@ def require_extended_realvul_outputs(paths: LineVulPaths) -> None:
     require_exists(combined_cache, combined_cache.name)
 
 
+def require_paired_test_outputs(paths: LineVulPaths) -> None:
+    require_exists(paths.host_test_predictions_csv, 'test_pred_with_code.csv')
+    require_exists(paths.host_raw_test_predictions_csv, 'raw_model_eval/test_pred_with_code.csv')
+
+    fine_npz = find_latest_hidden_state_output(paths.host_output_dir)
+    if fine_npz is None:
+        raise RuntimeError(
+            f'Expected fine-tuned test hidden-state export not found: {paths.host_output_dir}'
+        )
+    raw_npz = find_latest_hidden_state_output(paths.host_raw_test_output_dir)
+    if raw_npz is None:
+        raise RuntimeError(
+            'Expected raw-model test hidden-state export not found: '
+            f'{paths.host_raw_test_output_dir}'
+        )
+
+    for npz_path in (fine_npz, raw_npz):
+        require_exists(npz_path, str(npz_path))
+        image_path, cache_path = _artifact_image_and_cache(npz_path)
+        require_exists(image_path, image_path.name)
+        require_exists(cache_path, cache_path.name)
+
+    combined_image, combined_cache = combined_feature_artifact_paths(paths)
+    require_exists(combined_image, combined_image.name)
+    require_exists(combined_cache, combined_cache.name)
+
+
 def build_linevul_paths(
     config: LineVulRunConfig,
     run_dir: Path,
@@ -348,6 +382,10 @@ def build_linevul_paths(
     elif target_name == VULN_PATCH_TARGET_NAME:
         source_csv = run_dir / '07_dataset_export' / 'vuln_patch' / 'Real_Vul_data.csv'
         relative_parts = (VULN_PATCH_TARGET_NAME,)
+        run_name = run_dir.name
+    elif target_name == CVE_TRACE_PAIR_TARGET_NAME:
+        source_csv = CVE_TRACE_PAIR_SOURCE_CSV
+        relative_parts = (CVE_TRACE_PAIR_TARGET_NAME,)
         run_name = run_dir.name
     elif target_name == EXTENDED_REALVUL_TARGET_NAME:
         source_csv = extended_realvul_source_csv(config)
@@ -597,6 +635,10 @@ def build_line_vul_command(
         output_dir = paths.container_output_dir
     elif phase == 'test':
         phase_flags = ['--test_predict']
+        if paths.target_name == CVE_TRACE_PAIR_TARGET_NAME:
+            phase_flags.extend(
+                ['--eval_model_name', str(paths.container_output_dir / 'best_model')]
+            )
         train_batch_size = config.eval_batch_size
         eval_batch_size = config.eval_batch_size
         output_dir = paths.container_output_dir
@@ -658,6 +700,8 @@ def build_command_steps(
             phases = ('extended_eval',)
         elif paths.target_name == PRIMARY_TARGET_NAME:
             phases = ('prepare', 'train', 'test')
+        elif paths.target_name == CVE_TRACE_PAIR_TARGET_NAME:
+            phases = ('prepare', 'test', 'raw_test')
         elif paths.target_name == VULN_PATCH_TARGET_NAME:
             phases = ('prepare', 'test', 'raw_test')
         else:
@@ -729,11 +773,11 @@ def print_completion_summary(paths_list: Sequence[LineVulPaths]) -> None:
         if paths.target_name != EXTENDED_REALVUL_TARGET_NAME:
             print(f'  - [{paths.target_name}] best_model: {paths.host_best_model_dir}')
         print(f'  - [{paths.target_name}] test_predictions: {paths.host_test_predictions_csv}')
-        if paths.target_name == VULN_PATCH_TARGET_NAME:
+        if paths.target_name in {VULN_PATCH_TARGET_NAME, CVE_TRACE_PAIR_TARGET_NAME}:
             print(
                 f'  - [{paths.target_name}] raw_model_test_predictions: {paths.host_raw_test_predictions_csv}'
             )
-        if paths.target_name == EXTENDED_REALVUL_TARGET_NAME:
+        if paths.target_name in {CVE_TRACE_PAIR_TARGET_NAME, EXTENDED_REALVUL_TARGET_NAME}:
             fine_npz = find_latest_hidden_state_output(paths.host_output_dir)
             raw_npz = find_latest_hidden_state_output(paths.host_raw_test_output_dir)
             combined_image, combined_cache = combined_feature_artifact_paths(paths)
@@ -785,6 +829,68 @@ def run_extended_realvul_eval(config: LineVulRunConfig) -> int:
     run_logged_command(step.command, paths.host_extended_eval_log)
     require_extended_realvul_outputs(paths)
     print_completion_summary([paths])
+    return 0
+
+
+def run_linevul_cve_trace_pair(config: LineVulRunConfig) -> int:
+    validate_config(config)
+    run_dir = resolve_run_dir(config)
+    primary_paths = build_linevul_paths(config, run_dir, target_name=PRIMARY_TARGET_NAME)
+    cve_trace_pair_paths = build_linevul_paths(
+        config, run_dir, target_name=CVE_TRACE_PAIR_TARGET_NAME
+    )
+    validate_paths(cve_trace_pair_paths)
+    validate_stage07_csv(
+        cve_trace_pair_paths.source_csv,
+        required_dataset_types=TEST_ONLY_REQUIRED_DATASET_TYPES,
+    )
+    require_model_artifacts(primary_paths.host_best_model_dir, label='primary best_model')
+    ensure_output_targets([cve_trace_pair_paths], overwrite=config.overwrite)
+    commands = build_command_steps(config, [cve_trace_pair_paths])
+
+    if config.dry_run:
+        print_planned_commands(config, commands, [cve_trace_pair_paths])
+        return 0
+
+    check_container_running(config.container_name)
+    if config.overwrite:
+        cleanup_output_targets([cve_trace_pair_paths], container_name=config.container_name)
+
+    stage_source_csv(cve_trace_pair_paths)
+    stage_reused_best_model(primary_paths, cve_trace_pair_paths)
+    require_model_artifacts(
+        cve_trace_pair_paths.host_best_model_dir,
+        label=f'{CVE_TRACE_PAIR_TARGET_NAME} best_model',
+    )
+
+    prepare_step = next(
+        step
+        for step in commands
+        if step.paths.target_name == CVE_TRACE_PAIR_TARGET_NAME and step.phase == 'prepare'
+    )
+    print(f'Running LineVul prepare for {prepare_step.paths.display_name}...')
+    run_logged_command(prepare_step.command, cve_trace_pair_paths.host_prepare_log)
+    require_exists(cve_trace_pair_paths.host_test_dataset_pkl, 'test_dataset.pkl')
+
+    test_step = next(
+        step
+        for step in commands
+        if step.paths.target_name == CVE_TRACE_PAIR_TARGET_NAME and step.phase == 'test'
+    )
+    print(f'Running LineVul test for {test_step.paths.display_name}...')
+    run_logged_command(test_step.command, cve_trace_pair_paths.host_test_log)
+    require_exists(cve_trace_pair_paths.host_test_predictions_csv, 'test_pred_with_code.csv')
+
+    raw_test_step = next(
+        step
+        for step in commands
+        if step.paths.target_name == CVE_TRACE_PAIR_TARGET_NAME and step.phase == 'raw_test'
+    )
+    print(f'Running LineVul raw-model test for {raw_test_step.paths.display_name}...')
+    run_logged_command(raw_test_step.command, cve_trace_pair_paths.host_raw_test_log)
+    require_paired_test_outputs(cve_trace_pair_paths)
+
+    print_completion_summary([cve_trace_pair_paths])
     return 0
 
 
@@ -908,13 +1014,18 @@ def main() -> int:
             eval_batch_size=args.eval_batch_size,
             num_train_epochs=args.num_train_epochs,
             extended_realvul=args.extended_realvul,
+            cve_trace_pair=args.cve_trace_pair,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
         )
     )
     try:
+        if config.cve_trace_pair and config.extended_realvul:
+            raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
         if config.extended_realvul:
             return run_extended_realvul_eval(config)
+        if config.cve_trace_pair:
+            return run_linevul_cve_trace_pair(config)
         return run_linevul_from_pipeline(config)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

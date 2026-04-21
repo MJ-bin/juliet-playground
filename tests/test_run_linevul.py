@@ -137,6 +137,13 @@ def _write_training_loss_log(path: Path, entries: list[tuple[float, float]]) -> 
     write_text(path, ''.join(rows))
 
 
+def _write_linevul_model_dir(path: Path, *, config_text: str = '{}\n') -> Path:
+    write_text(path / 'config.json', config_text)
+    write_text(path / 'pytorch_model.bin', 'weights\n')
+    write_text(path / 'training_args.bin', 'args\n')
+    return path
+
+
 def _write_extended_realvul_csv(path: Path) -> None:
     fieldnames = [
         'file_name',
@@ -255,6 +262,56 @@ def test_run_linevul_dry_run_includes_optional_vuln_patch_eval(tmp_path, capsys)
     assert 'vuln_patch' in captured.out
 
 
+def test_run_linevul_cve_trace_pair_dry_run_prints_prepare_test_and_raw_test(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_dry_run',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_vuln_patch_csv(run_dir / '07_dataset_export' / 'vuln_patch' / 'Real_Vul_data.csv')
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _write_linevul_model_dir(
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'best_model'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert '[cve_trace_pair/prepare]' in captured.out
+    assert '[cve_trace_pair/test]' in captured.out
+    assert '[cve_trace_pair/raw_test]' in captured.out
+    assert '[primary/train]' not in captured.out
+    assert '[vuln_patch/prepare]' not in captured.out
+    assert '[vuln_patch/raw_test]' not in captured.out
+    assert '--eval_model_name' in captured.out
+    assert 'vuln_patch' not in captured.out
+
+
 def test_stage_downloaded_model_archive_extracts_nested_model_dir(tmp_path):
     module = load_module_from_path(
         'test_run_linevul_stage_downloaded_model_archive',
@@ -323,6 +380,7 @@ def test_run_linevul_extended_realvul_downloads_assets_and_runs_single_command(
             eval_batch_size=module.DEFAULT_EVAL_BATCH_SIZE,
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=True,
+            cve_trace_pair=False,
             overwrite=False,
             dry_run=False,
         )
@@ -588,6 +646,130 @@ def test_run_linevul_reuses_primary_best_model_for_vuln_patch_eval(tmp_path, mon
         assert not os.path.isabs(os.readlink(vuln_host_output_dir / 'best_model'))
 
 
+def test_run_linevul_cve_trace_pair_reuses_primary_best_model_and_runs_prepare_test_and_raw_test(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_execute',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+
+    primary_output_dir = (
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+    )
+    _write_linevul_model_dir(primary_output_dir / 'best_model', config_text='{"model":"primary"}\n')
+
+    cve_dataset_dir = (
+        vpbench_root
+        / 'downloads'
+        / 'RealVul'
+        / 'datasets'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'cve_trace_pair'
+    )
+    cve_output_dir = primary_output_dir / 'cve_trace_pair'
+    combined_image = cve_output_dir / 'combined_test_last_hidden_state_vectors.jpeg'
+    combined_cache = cve_output_dir / 'combined_test_last_hidden_state_vectors-tsne-features.json'
+
+    commands: list[tuple[list[str], Path]] = []
+
+    def fake_run_logged_command(command, log_path):
+        commands.append((list(command), log_path))
+        write_text(log_path, '$ ' + ' '.join(command) + '\n')
+        if log_path == cve_output_dir / 'prepare.log':
+            assert (cve_output_dir / 'best_model' / 'config.json').exists()
+            write_text(cve_dataset_dir / 'test_dataset.pkl', 'test\n')
+        elif log_path == cve_output_dir / 'test.log':
+            assert (cve_output_dir / 'best_model' / 'config.json').exists()
+            write_text(cve_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,1\n')
+            fine_npz = cve_output_dir / '20260401-000000-000000_test_last_hidden_state_vectors.npz'
+            fine_image, fine_cache = module._artifact_image_and_cache(fine_npz)
+            write_text(fine_npz, 'fine npz\n')
+            write_text(fine_image, 'fine image\n')
+            write_text(fine_cache, '{}\n')
+        elif log_path == cve_output_dir / 'raw_model_test.log':
+            raw_output_dir = cve_output_dir / 'raw_model_eval'
+            write_text(raw_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,0\n')
+            raw_npz = raw_output_dir / '20260401-000001-000000_test_last_hidden_state_vectors.npz'
+            raw_image, raw_cache = module._artifact_image_and_cache(raw_npz)
+            write_text(raw_npz, 'raw npz\n')
+            write_text(raw_image, 'raw image\n')
+            write_text(raw_cache, '{}\n')
+            write_text(combined_image, 'combined image\n')
+            write_text(combined_cache, '{}\n')
+        else:
+            raise AssertionError(f'unexpected log path: {log_path}')
+
+    monkeypatch.setattr(module, 'check_container_running', lambda _container_name: None)
+    monkeypatch.setattr(module, 'run_logged_command', fake_run_logged_command)
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+        ],
+    )
+
+    assert result == 0
+    assert [log_path for _, log_path in commands] == [
+        cve_output_dir / 'prepare.log',
+        cve_output_dir / 'test.log',
+        cve_output_dir / 'raw_model_test.log',
+    ]
+    prepare_command = commands[0][0]
+    test_command = commands[1][0]
+    raw_test_command = commands[2][0]
+    assert '--prepare_dataset' in prepare_command
+    assert '--test_predict' in test_command
+    assert '--test_predict' in raw_test_command
+    assert '--train' not in prepare_command
+    assert '--train' not in test_command
+    assert '--train' not in raw_test_command
+    assert '--eval_model_name' in test_command
+    assert test_command[test_command.index('--eval_model_name') + 1] == str(
+        module.CONTAINER_EXPERIMENT_BASE
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'cve_trace_pair'
+        / 'best_model'
+    )
+    assert '--eval_model_name' in raw_test_command
+    assert raw_test_command[raw_test_command.index('--eval_model_name') + 1] == (
+        module.DEFAULT_MODEL_NAME
+    )
+    assert cve_dataset_dir.joinpath('Real_Vul_data.csv').read_text(encoding='utf-8') == (
+        cve_csv.read_text(encoding='utf-8')
+    )
+    assert cve_output_dir.joinpath('best_model', 'config.json').exists()
+    assert cve_output_dir.joinpath('best_model', 'pytorch_model.bin').exists()
+    assert cve_output_dir.joinpath('test_pred_with_code.csv').exists()
+    assert cve_output_dir.joinpath('raw_model_eval', 'test_pred_with_code.csv').exists()
+    assert combined_image.exists()
+    assert combined_cache.exists()
+    assert not cve_output_dir.joinpath('train.log').exists()
+    captured = capsys.readouterr()
+    assert 'combined_tsne_image' in captured.out
+    assert str(combined_image) in captured.out
+
+
 def test_load_epoch_training_losses_ignores_non_matching_lines_and_overwrites_duplicates(tmp_path):
     module = load_module_from_path(
         'test_run_linevul_parse_training_loss_log',
@@ -608,6 +790,7 @@ def test_load_epoch_training_losses_ignores_non_matching_lines_and_overwrites_du
             eval_batch_size=module.DEFAULT_EVAL_BATCH_SIZE,
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=False,
+            cve_trace_pair=False,
             overwrite=False,
             dry_run=False,
         )
@@ -706,6 +889,7 @@ def test_cleanup_output_targets_falls_back_to_container_rm_on_permission_error(
             eval_batch_size=module.DEFAULT_EVAL_BATCH_SIZE,
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=False,
+            cve_trace_pair=False,
             overwrite=True,
             dry_run=False,
         )
@@ -892,3 +1076,169 @@ def test_run_linevul_requires_overwrite_for_existing_targets(tmp_path, capsys):
     assert result == 2
     captured = capsys.readouterr()
     assert 'use --overwrite to replace it' in captured.err
+
+
+def test_run_linevul_cve_trace_pair_fails_when_primary_best_model_is_missing(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_missing_primary_model',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert 'primary best_model/config.json' in captured.err
+
+
+def test_run_linevul_cve_trace_pair_requires_overwrite_for_existing_target(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_existing_target',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _write_linevul_model_dir(
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'best_model'
+    )
+    existing_output_dir = (
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'cve_trace_pair'
+    )
+    existing_output_dir.mkdir(parents=True, exist_ok=True)
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'use --overwrite to replace it' in captured.err
+
+
+def test_run_linevul_cve_trace_pair_requires_fixed_dataset_csv(tmp_path, monkeypatch, capsys):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_missing_dataset',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    missing_csv = tmp_path / 'cases' / 'missing.csv'
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', missing_csv)
+    _write_linevul_model_dir(
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'best_model'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'Stage 07 dataset CSV not found' in captured.err
+
+
+def test_run_linevul_cve_trace_pair_requires_test_rows_in_fixed_dataset(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_missing_test_rows',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_stage07_csv(cve_csv, include_test_rows=False)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _write_linevul_model_dir(
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'best_model'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert 'must contain test rows' in captured.err
