@@ -86,17 +86,23 @@ start = var->ptr + var->already_scanned;
 vsep = memchr(start, '&', var->end - start);
 "
 9,9,1,"1",rsyslog,,,test,"
+CHKiRet(actionPrepare(pThis, pWti));
 CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
 CHKiRet(actionCallDoAction(pThis, actParams, pWti));
 iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+static rsRetVal doAction(void * pMsgData, wrkrInstanceData_t __attribute__((unused)) *pWrkrData){
+instanceData *pData = pWrkrData->pData;
 iRet = writeZMQ(ppString[0], pData);
 CHKiRet(initZMQ(pData));
 if(-1 == zsocket_bind(pData->socket, (char*)pData->description)) {
 "
 10,10,0,,rsyslog,,,test,"
+CHKiRet(actionPrepare(pThis, pWti));
 CHKiRet(pThis->pMod->mod.om.createWrkrInstance(&(pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData), pThis->pModData));
 CHKiRet(actionCallDoAction(pThis, actParams, pWti));
 iRet = pThis->pMod->mod.om.doAction(param, pWti->actWrkrInfo[pThis->iActionNbr].actWrkrData);
+static rsRetVal doAction(void * pMsgData, wrkrInstanceData_t __attribute__((unused)) *pWrkrData){
+instanceData *pData = pWrkrData->pData;
 iRet = writeZMQ(ppString[0], pData);
 CHKiRet(initZMQ(pData));
 if(-1 == zsocket_bind(pData->socket, ""%s"", (char*)pData->description)) {
