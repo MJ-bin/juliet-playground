@@ -107,7 +107,7 @@ iRet = writeZMQ(ppString[0], pData);
 CHKiRet(initZMQ(pData));
 if(-1 == zsocket_bind(pData->socket, ""%s"", (char*)pData->description)) {
 "
-11,11,1,"1",plasma-workspace,,"fc9b8df",test,"
+11,11,1,"1",plasma-workspace,,,test,"
 void SolidUiServer::showActionsDialog(const QString &udi, const QStringList &desktopFiles)
 foreach (const QString &desktop, desktopFiles) {
 const QString filePath = QStandardPaths::locate(QStandardPaths::GenericDataLocation, ""solid/actions/""+desktop)
@@ -143,7 +143,7 @@ if (server->method) method = server->method;
 snprintf(cmd, BUF_SIZE, '%s -m %s --manager-address %s -f %s/.shadowsocks_%s.pid -c %s/.shadowsocks_%s.conf`', executable, method, manager->manager_address, working_dir, server->port, working_dir, server->port);
 if (system(cmd) == -1) {
 "
-14,14,1,"1,2",openjpeg,,e7640f5,test,"
+14,14,1,"1,2",openjpeg,,,test,"
 image = bmptoimage(parameters.infile, &parameters);
 opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
 IN = fopen(filename, ""rb"");
@@ -216,7 +216,7 @@ return r_sandbox_system (str, 1);
 R_API int r_sandbox_system (const char *x, int n) {
 return system (x);
 "
-16,16,1,"1",ghostpdl,,0edd3d6c6,test,"
+16,16,1,"1",ghostpdl,,,test,"
 int gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
 gx_device_printer * const ppdev = (gx_device_printer *)pdev;
 switch (code = param_read_string(plist, (param_name = ""OutputFile""), &ofs)) {
