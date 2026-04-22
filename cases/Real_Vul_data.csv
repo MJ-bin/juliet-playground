@@ -1,5 +1,5 @@
 file_name,unique_id,target,vulnerable_line_numbers,project,source_signature_path,commit_hash,dataset_type,processed_func
-1,1,1,"1",patch,,,test,"outfile = xstrdup (optarg);
+1,1,1,"1",patch__CVE-2019-13638,,,test,"outfile = xstrdup (optarg);
 outname = outfile;
 outfd = make_tempfile (&TMPOUTNAME, 'o', outname, O_WRONLY | binary_transput, instat.st_mode & S_IRWXUGO);
 int make_tempfile (char const **name, char letter, char const *real_name, int flags, mode_t mode)
@@ -11,7 +11,7 @@ void do_ed_script (char const *inname, char const *outname, bool *outname_needs_
 sprintf (buf, '%s %s%s', editor_program, verbosity == VERBOSE ? '' : '- ', outname);
 execl ('/bin/sh', 'sh', '-c', buf, (char *) 0);
 "
-2,2,0,,patch,,,test,"outfile = xstrdup (optarg);
+2,2,0,,patch__CVE-2019-13638,,,test,"outfile = xstrdup (optarg);
 outname = outfile;
 outfd = make_tempfile (&TMPOUTNAME, 'o', outname, O_WRONLY | binary_transput, instat.st_mode & S_IRWXUGO);
 int make_tempfile (char const **name, char letter, char const *real_name, int flags, mode_t mode)
