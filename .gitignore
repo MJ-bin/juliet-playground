@@ -215,3 +215,4 @@ experiments/*/outputs/
 cases/*/runs/
 
 .codex
+WORKLOG.md
