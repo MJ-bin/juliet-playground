@@ -22,7 +22,7 @@ do_ed_script (inname, TMPOUTNAME, &TMPOUTNAME_needs_removal, outstate.ofp);
 void do_ed_script (char const *inname, char const *outname, bool *outname_needs_removal, FILE *ofp)
 execlp (editor_program, editor_program, '-', outname, (char  *) NULL);
 "
-3,3,1,"1",php-src,,,test,"
+3,3,1,"1",php-src__CVE-2015-8617,,,test,"
 zend_throw_or_error(fetch_type, NULL, ""Class '%s' not found"", ZSTR_VAL(class_name));
 static void zend_throw_or_error(int fetch_type, zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
@@ -30,7 +30,7 @@ zend_throw_error(exception_ce, message);
 ZEND_API ZEND_COLD void zend_throw_error(zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
 "
-4,4,0,,php-src,,,test,"
+4,4,0,,php-src__CVE-2015-8617,,,test,"
 zend_throw_or_error(fetch_type, NULL, ""Class '%s' not found"", ZSTR_VAL(class_name));
 static void zend_throw_or_error(int fetch_type, zend_class_entry *exception_ce, const char *format, ...)
 zend_vspprintf(&message, 0, format, va);
