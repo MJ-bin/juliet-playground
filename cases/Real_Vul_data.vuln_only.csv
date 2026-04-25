@@ -101,7 +101,22 @@ code = parsed.iodev->procs.gp_fopen(parsed.iodev, parsed.fname, fmode, pfile, NU
 static int pipe_fopen(gx_io_device * iodev, const char *fname, const char *access, FILE ** pfile, char *rfname, uint rnamelen)
 *pfile = popen((char *)fname, (char *)access);
 "
-17,17,0,"1,2",openjpeg,,,test,"
+17,17,0,"1",ghostpdl,,,test,"
+saveLockSafety = gs_currentdevice_inline(pgs)->LockSafetyParams;
+if ((code = gs_setdevice_no_erase(pgs, ndev)) < 0)
+int gs_setdevice_no_erase(gs_gstate * pgs, gx_device * dev)
+gs_setdevice_no_init(pgs, dev);
+rc_assign(pgs->device, dev, "gs_setdevice_no_init");
+gs_currentdevice_inline(pgs)->LockSafetyParams = saveLockSafety;
+code = gs_putdeviceparams(dev, (gs_param_list *) & list);
+int gs_putdeviceparams(gx_device * dev, gs_param_list * plist)
+code = (*dev_proc(dev, put_params)) (dev, plist);
+int gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
+gx_device_printer * const ppdev = (gx_device_printer *)pdev;
+switch (code = param_read_string(plist, (param_name = ""OutputFile""), &ofs)) {
+if (pdev->LockSafetyParams && bytes_compare(ofs.data, ofs.size, (const byte *)ppdev->fname, strlen(ppdev->fname))) {
+"
+18,18,0,"1,2",openjpeg,,,test,"
 image = bmptoimage(parameters.infile, &parameters);
 opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
 IN = fopen(filename, ""rb"");
