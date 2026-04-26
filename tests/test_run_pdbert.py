@@ -237,6 +237,8 @@ def test_run_pdbert_stages_csv_configs_and_runs_primary_pipeline(tmp_path, monke
             raw_model_dir=None,
             extended_realvul=False,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -338,6 +340,8 @@ def test_run_pdbert_prepares_python38_compatible_analyze_script(tmp_path):
             raw_model_dir=None,
             extended_realvul=False,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -502,6 +506,8 @@ def test_run_pdbert_extended_realvul_executes_after_and_before_eval(tmp_path, mo
             raw_model_dir=None,
             extended_realvul=True,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -723,6 +729,8 @@ def test_run_pdbert_cve_trace_pair_executes_fine_tuned_and_raw_compare(tmp_path,
             raw_model_dir=raw_model_dir,
             extended_realvul=False,
             cve_trace_pair=True,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -1040,3 +1048,116 @@ def test_run_pdbert_cve_trace_pair_rejects_extended_realvul_flag(tmp_path, capsy
     assert result == 2
     captured = capsys.readouterr()
     assert '--cve-trace-pair cannot be used with --extended-realvul' in captured.err
+
+
+def test_run_pdbert_triplet_tsne_only_routes_to_exporter(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_run_pdbert_triplet_tsne_only',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    export_calls: list[tuple[bool, Path]] = []
+
+    monkeypatch.setattr(
+        module,
+        'export_pdbert_triplet_tsne',
+        lambda config, *, run_dir: export_calls.append((config.triplet_tsne_only, run_dir)) or None,
+    )
+    monkeypatch.setattr(
+        module,
+        'run_pdbert_from_pipeline',
+        lambda _config: (_ for _ in ()).throw(AssertionError('unexpected pipeline run')),
+    )
+    monkeypatch.setattr(
+        module,
+        'run_pdbert_cve_trace_pair',
+        lambda _config: (_ for _ in ()).throw(AssertionError('unexpected cve run')),
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--triplet-tsne-only',
+        ],
+    )
+
+    assert result == 0
+    assert export_calls == [(True, run_dir.resolve())]
+
+
+def test_run_pdbert_triplet_tsne_runs_after_cve_trace_pair(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_run_pdbert_triplet_tsne_after_cve',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(tmp_path / 'raw-model')
+    cve_calls: list[bool] = []
+    export_calls: list[Path] = []
+
+    monkeypatch.setattr(
+        module, 'run_pdbert_cve_trace_pair', lambda _config: cve_calls.append(True) or 0
+    )
+    monkeypatch.setattr(
+        module,
+        'export_pdbert_triplet_tsne',
+        lambda _config, *, run_dir: export_calls.append(run_dir) or None,
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--cve-trace-pair',
+            '--triplet-tsne',
+        ],
+    )
+
+    assert result == 0
+    assert cve_calls == [True]
+    assert export_calls == [run_dir.resolve()]
+
+
+def test_run_pdbert_triplet_tsne_requires_cve_trace_pair(tmp_path, capsys):
+    module = load_module_from_path(
+        'test_run_pdbert_triplet_tsne_requires_cve',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    _write_stage07_csv(run_dir / '07_dataset_export' / 'Real_Vul_data.csv')
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_pretrained_model_dir(tmp_path / 'raw-model')
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--triplet-tsne',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert '--triplet-tsne requires --cve-trace-pair' in captured.err

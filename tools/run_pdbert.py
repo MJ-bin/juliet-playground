@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from shared import bench_runner as _bench_runner
+from shared import triplet_tsne as _triplet_tsne
 from shared.artifact_layout import build_dataset_export_paths
 from shared.paths import RESULT_DIR
 
@@ -76,6 +77,8 @@ class PDBERTRunConfig:
     raw_model_dir: Path | None
     extended_realvul: bool
     cve_trace_pair: bool
+    triplet_tsne: bool
+    triplet_tsne_only: bool
     overwrite: bool
     dry_run: bool
 
@@ -169,6 +172,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--raw-model-dir', type=Path, default=DEFAULT_RAW_MODEL_DIR)
     parser.add_argument('--extended-realvul', action='store_true')
     parser.add_argument('--cve-trace-pair', action='store_true')
+    parser.add_argument('--triplet-tsne', action='store_true')
+    parser.add_argument('--triplet-tsne-only', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     return parser.parse_args()
@@ -183,6 +188,8 @@ def normalize_config(config: PDBERTRunConfig) -> PDBERTRunConfig:
         raw_model_dir=config.raw_model_dir.resolve() if config.raw_model_dir is not None else None,
         extended_realvul=config.extended_realvul,
         cve_trace_pair=config.cve_trace_pair,
+        triplet_tsne=config.triplet_tsne,
+        triplet_tsne_only=config.triplet_tsne_only,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
     )
@@ -193,6 +200,12 @@ def validate_config(config: PDBERTRunConfig) -> None:
         raise ValueError(f'VP-Bench root not found: {config.vpbench_root}')
     if config.cve_trace_pair and config.extended_realvul:
         raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
+    if config.triplet_tsne and config.triplet_tsne_only:
+        raise ValueError('--triplet-tsne and --triplet-tsne-only cannot be used together')
+    if config.extended_realvul and (config.triplet_tsne or config.triplet_tsne_only):
+        raise ValueError(
+            '--triplet-tsne and --triplet-tsne-only are not supported with --extended-realvul'
+        )
     if not config.extended_realvul and config.run_dir is None and not config.pipeline_root.exists():
         raise ValueError(f'Pipeline root not found: {config.pipeline_root}')
     if config.raw_model_dir is not None and not config.raw_model_dir.exists():
@@ -1192,6 +1205,96 @@ def combined_feature_artifact_paths(paths: PDBERTPaths) -> tuple[Path, Path]:
     return Path(f'{base_path}.jpeg'), Path(f'{base_path}-tsne-features.json')
 
 
+def pdbert_triplet_output_dir(primary_paths: PDBERTPaths) -> Path:
+    return primary_paths.host_output_dir.parent / '_triplet_tsne'
+
+
+def _triplet_source_csv_path(paths: PDBERTPaths) -> Path:
+    if paths.host_dataset_csv.exists():
+        return paths.host_dataset_csv
+    return paths.source_csv
+
+
+def build_pdbert_triplet_request(
+    config: PDBERTRunConfig,
+    *,
+    run_dir: Path,
+) -> _triplet_tsne.TripletTSNERequest:
+    primary_paths = build_pdbert_paths(config, run_dir, target_name=PRIMARY_TARGET_NAME)
+    cve_paths = build_pdbert_paths(config, run_dir, target_name=CVE_TRACE_PAIR_TARGET_NAME)
+    validate_paths(primary_paths)
+    validate_paths(cve_paths)
+    return _triplet_tsne.TripletTSNERequest(
+        model_name='PDBERT',
+        plot_title='PDBERT Triplet t-SNE on Juliet/CVE Trace Pair',
+        output_dir=pdbert_triplet_output_dir(primary_paths),
+        cohorts=(
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='juliet_after_fine_tuned',
+                feature_npz_path=primary_paths.host_feature_npz,
+                source_csv_path=_triplet_source_csv_path(primary_paths),
+                prediction_csv_path=primary_paths.host_eval_result_csv,
+                prediction_kind=_triplet_tsne.PDBERT_PREDICTION_KIND,
+            ),
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='cve_before_fine_tuned',
+                feature_npz_path=cve_paths.host_raw_feature_npz,
+                source_csv_path=_triplet_source_csv_path(cve_paths),
+                prediction_csv_path=cve_paths.host_raw_eval_result_csv,
+                prediction_kind=_triplet_tsne.PDBERT_PREDICTION_KIND,
+            ),
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='cve_after_fine_tuned',
+                feature_npz_path=cve_paths.host_feature_npz,
+                source_csv_path=_triplet_source_csv_path(cve_paths),
+                prediction_csv_path=cve_paths.host_eval_result_csv,
+                prediction_kind=_triplet_tsne.PDBERT_PREDICTION_KIND,
+            ),
+        ),
+        overwrite=config.overwrite,
+    )
+
+
+def print_triplet_tsne_plan(request: _triplet_tsne.TripletTSNERequest) -> None:
+    image_path, cache_path, points_jsonl_path = _triplet_tsne.build_triplet_artifact_paths(
+        request.output_dir
+    )
+    print(f'Triplet t-SNE output dir: {request.output_dir}')
+    for cohort in request.cohorts:
+        print(f'  - [{cohort.cohort_key}] feature_npz: {cohort.feature_npz_path}')
+        print(f'  - [{cohort.cohort_key}] source_csv: {cohort.source_csv_path}')
+        if cohort.prediction_csv_path is not None:
+            print(f'  - [{cohort.cohort_key}] prediction_csv: {cohort.prediction_csv_path}')
+    print(f'  - triplet_tsne_image: {image_path}')
+    print(f'  - triplet_tsne_cache: {cache_path}')
+    print(f'  - triplet_tsne_points: {points_jsonl_path}')
+
+
+def export_pdbert_triplet_tsne(
+    config: PDBERTRunConfig,
+    *,
+    run_dir: Path,
+) -> _triplet_tsne.TripletTSNEResult | None:
+    request = build_pdbert_triplet_request(config, run_dir=run_dir)
+    if config.dry_run:
+        print_triplet_tsne_plan(request)
+        return None
+    result = _triplet_tsne.export_triplet_tsne(request)
+    print(f'Triplet t-SNE image: {result.image_path}')
+    print(f'Triplet t-SNE cache: {result.cache_path}')
+    print(f'Triplet t-SNE points manifest: {result.points_jsonl_path}')
+    return result
+
+
+def run_pdbert_triplet_tsne_only(config: PDBERTRunConfig) -> int:
+    if config.raw_model_dir is not None and not config.raw_model_dir.exists():
+        config = replace(config, raw_model_dir=None)
+    validate_config(config)
+    run_dir = resolve_run_dir(config)
+    export_pdbert_triplet_tsne(config, run_dir=run_dir)
+    return 0
+
+
 def print_completion_summary(
     paths_list: Sequence[PDBERTPaths],
     *,
@@ -1525,13 +1628,25 @@ def main() -> int:
             raw_model_dir=args.raw_model_dir,
             extended_realvul=args.extended_realvul,
             cve_trace_pair=args.cve_trace_pair,
+            triplet_tsne=args.triplet_tsne,
+            triplet_tsne_only=args.triplet_tsne_only,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
         )
     )
     try:
+        if config.triplet_tsne_only:
+            return run_pdbert_triplet_tsne_only(config)
+        if config.triplet_tsne and not config.cve_trace_pair:
+            raise ValueError(
+                '--triplet-tsne requires --cve-trace-pair; use --triplet-tsne-only to reuse existing artifacts'
+            )
         if config.cve_trace_pair:
-            return run_pdbert_cve_trace_pair(config)
+            result = run_pdbert_cve_trace_pair(config)
+            if result == 0 and config.triplet_tsne:
+                run_dir = resolve_run_dir(config)
+                export_pdbert_triplet_tsne(config, run_dir=run_dir)
+            return result
         if config.extended_realvul:
             return run_extended_realvul_eval(config)
         return run_pdbert_from_pipeline(config)

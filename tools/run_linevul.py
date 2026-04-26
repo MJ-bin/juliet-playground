@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Sequence
 
 from shared import bench_runner as _bench_runner
+from shared import triplet_tsne as _triplet_tsne
 from shared.artifact_layout import build_dataset_export_paths
 from shared.paths import RESULT_DIR
 
@@ -69,6 +70,8 @@ class LineVulRunConfig:
     num_train_epochs: int
     extended_realvul: bool
     cve_trace_pair: bool
+    triplet_tsne: bool
+    triplet_tsne_only: bool
     overwrite: bool
     dry_run: bool
 
@@ -138,6 +141,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num-train-epochs', type=int, default=DEFAULT_NUM_TRAIN_EPOCHS)
     parser.add_argument('--extended-realvul', action='store_true')
     parser.add_argument('--cve-trace-pair', action='store_true')
+    parser.add_argument('--triplet-tsne', action='store_true')
+    parser.add_argument('--triplet-tsne-only', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     return parser.parse_args()
@@ -156,6 +161,8 @@ def normalize_config(config: LineVulRunConfig) -> LineVulRunConfig:
         num_train_epochs=config.num_train_epochs,
         extended_realvul=config.extended_realvul,
         cve_trace_pair=config.cve_trace_pair,
+        triplet_tsne=config.triplet_tsne,
+        triplet_tsne_only=config.triplet_tsne_only,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
     )
@@ -172,6 +179,12 @@ def validate_config(config: LineVulRunConfig) -> None:
         raise ValueError(f'num_train_epochs must be > 0: {config.num_train_epochs}')
     if config.cve_trace_pair and config.extended_realvul:
         raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
+    if config.triplet_tsne and config.triplet_tsne_only:
+        raise ValueError('--triplet-tsne and --triplet-tsne-only cannot be used together')
+    if config.extended_realvul and (config.triplet_tsne or config.triplet_tsne_only):
+        raise ValueError(
+            '--triplet-tsne and --triplet-tsne-only are not supported with --extended-realvul'
+        )
     if config.extended_realvul and config.run_dir is not None:
         raise ValueError('--run-dir is not used with --extended-realvul')
 
@@ -212,6 +225,114 @@ def _artifact_image_and_cache(npz_path: Path) -> tuple[Path, Path]:
 def combined_feature_artifact_paths(paths: LineVulPaths) -> tuple[Path, Path]:
     base_path = paths.host_output_dir / COMBINED_TEST_TSNE_BASENAME
     return Path(f'{base_path}.jpeg'), Path(f'{base_path}-tsne-features.json')
+
+
+def linevul_triplet_output_dir(primary_paths: LineVulPaths) -> Path:
+    return primary_paths.host_output_dir / '_triplet_tsne'
+
+
+def _triplet_source_csv_path(paths: LineVulPaths) -> Path:
+    if paths.host_dataset_csv.exists():
+        return paths.host_dataset_csv
+    return paths.source_csv
+
+
+def build_linevul_triplet_request(
+    config: LineVulRunConfig,
+    *,
+    run_dir: Path,
+) -> _triplet_tsne.TripletTSNERequest:
+    primary_paths = build_linevul_paths(config, run_dir, target_name=PRIMARY_TARGET_NAME)
+    cve_paths = build_linevul_paths(config, run_dir, target_name=CVE_TRACE_PAIR_TARGET_NAME)
+    validate_paths(primary_paths)
+    validate_paths(cve_paths)
+
+    fine_npz = find_latest_hidden_state_output(primary_paths.host_output_dir)
+    if fine_npz is None:
+        raise FileNotFoundError(
+            'Triplet t-SNE fine-tuned Juliet test hidden states not found under '
+            f'{primary_paths.host_output_dir}'
+        )
+    cve_after_npz = find_latest_hidden_state_output(cve_paths.host_output_dir)
+    if cve_after_npz is None:
+        raise FileNotFoundError(
+            'Triplet t-SNE fine-tuned CVE test hidden states not found under '
+            f'{cve_paths.host_output_dir}'
+        )
+    cve_before_npz = find_latest_hidden_state_output(cve_paths.host_raw_test_output_dir)
+    if cve_before_npz is None:
+        raise FileNotFoundError(
+            'Triplet t-SNE raw CVE test hidden states not found under '
+            f'{cve_paths.host_raw_test_output_dir}'
+        )
+
+    return _triplet_tsne.TripletTSNERequest(
+        model_name='LineVul',
+        plot_title='LineVul Triplet t-SNE on Juliet/CVE Trace Pair',
+        output_dir=linevul_triplet_output_dir(primary_paths),
+        cohorts=(
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='juliet_after_fine_tuned',
+                feature_npz_path=fine_npz,
+                source_csv_path=_triplet_source_csv_path(primary_paths),
+                prediction_csv_path=primary_paths.host_test_predictions_csv,
+                prediction_kind=_triplet_tsne.LINEVUL_PREDICTION_KIND,
+            ),
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='cve_before_fine_tuned',
+                feature_npz_path=cve_before_npz,
+                source_csv_path=_triplet_source_csv_path(cve_paths),
+                prediction_csv_path=cve_paths.host_raw_test_predictions_csv,
+                prediction_kind=_triplet_tsne.LINEVUL_PREDICTION_KIND,
+            ),
+            _triplet_tsne.TripletCohortSpec(
+                cohort_key='cve_after_fine_tuned',
+                feature_npz_path=cve_after_npz,
+                source_csv_path=_triplet_source_csv_path(cve_paths),
+                prediction_csv_path=cve_paths.host_test_predictions_csv,
+                prediction_kind=_triplet_tsne.LINEVUL_PREDICTION_KIND,
+            ),
+        ),
+        overwrite=config.overwrite,
+    )
+
+
+def print_triplet_tsne_plan(request: _triplet_tsne.TripletTSNERequest) -> None:
+    image_path, cache_path, points_jsonl_path = _triplet_tsne.build_triplet_artifact_paths(
+        request.output_dir
+    )
+    print(f'Triplet t-SNE output dir: {request.output_dir}')
+    for cohort in request.cohorts:
+        print(f'  - [{cohort.cohort_key}] feature_npz: {cohort.feature_npz_path}')
+        print(f'  - [{cohort.cohort_key}] source_csv: {cohort.source_csv_path}')
+        if cohort.prediction_csv_path is not None:
+            print(f'  - [{cohort.cohort_key}] prediction_csv: {cohort.prediction_csv_path}')
+    print(f'  - triplet_tsne_image: {image_path}')
+    print(f'  - triplet_tsne_cache: {cache_path}')
+    print(f'  - triplet_tsne_points: {points_jsonl_path}')
+
+
+def export_linevul_triplet_tsne(
+    config: LineVulRunConfig,
+    *,
+    run_dir: Path,
+) -> _triplet_tsne.TripletTSNEResult | None:
+    request = build_linevul_triplet_request(config, run_dir=run_dir)
+    if config.dry_run:
+        print_triplet_tsne_plan(request)
+        return None
+    result = _triplet_tsne.export_triplet_tsne(request)
+    print(f'Triplet t-SNE image: {result.image_path}')
+    print(f'Triplet t-SNE cache: {result.cache_path}')
+    print(f'Triplet t-SNE points manifest: {result.points_jsonl_path}')
+    return result
+
+
+def run_linevul_triplet_tsne_only(config: LineVulRunConfig) -> int:
+    validate_config(config)
+    run_dir = resolve_run_dir(config)
+    export_linevul_triplet_tsne(config, run_dir=run_dir)
+    return 0
 
 
 def find_latest_hidden_state_output(output_dir: Path, *, split_name: str = 'test') -> Path | None:
@@ -1015,17 +1136,29 @@ def main() -> int:
             num_train_epochs=args.num_train_epochs,
             extended_realvul=args.extended_realvul,
             cve_trace_pair=args.cve_trace_pair,
+            triplet_tsne=args.triplet_tsne,
+            triplet_tsne_only=args.triplet_tsne_only,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
         )
     )
     try:
+        if config.triplet_tsne_only:
+            return run_linevul_triplet_tsne_only(config)
+        if config.triplet_tsne and not config.cve_trace_pair:
+            raise ValueError(
+                '--triplet-tsne requires --cve-trace-pair; use --triplet-tsne-only to reuse existing artifacts'
+            )
         if config.cve_trace_pair and config.extended_realvul:
             raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
         if config.extended_realvul:
             return run_extended_realvul_eval(config)
         if config.cve_trace_pair:
-            return run_linevul_cve_trace_pair(config)
+            result = run_linevul_cve_trace_pair(config)
+            if result == 0 and config.triplet_tsne:
+                run_dir = resolve_run_dir(config)
+                export_linevul_triplet_tsne(config, run_dir=run_dir)
+            return result
         return run_linevul_from_pipeline(config)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

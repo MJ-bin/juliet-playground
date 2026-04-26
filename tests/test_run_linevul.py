@@ -381,6 +381,8 @@ def test_run_linevul_extended_realvul_downloads_assets_and_runs_single_command(
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=True,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -791,6 +793,8 @@ def test_load_epoch_training_losses_ignores_non_matching_lines_and_overwrites_du
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=False,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=False,
             dry_run=False,
         )
@@ -890,6 +894,8 @@ def test_cleanup_output_targets_falls_back_to_container_rm_on_permission_error(
             num_train_epochs=module.DEFAULT_NUM_TRAIN_EPOCHS,
             extended_realvul=False,
             cve_trace_pair=False,
+            triplet_tsne=False,
+            triplet_tsne_only=False,
             overwrite=True,
             dry_run=False,
         )
@@ -1242,3 +1248,112 @@ def test_run_linevul_cve_trace_pair_requires_test_rows_in_fixed_dataset(
     assert result == 2
     captured = capsys.readouterr()
     assert 'must contain test rows' in captured.err
+
+
+def test_run_linevul_triplet_tsne_only_routes_to_exporter(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_run_linevul_triplet_tsne_only',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    export_calls: list[tuple[bool, Path]] = []
+
+    monkeypatch.setattr(
+        module,
+        'export_linevul_triplet_tsne',
+        lambda config, *, run_dir: export_calls.append((config.triplet_tsne_only, run_dir)) or None,
+    )
+    monkeypatch.setattr(
+        module,
+        'run_linevul_from_pipeline',
+        lambda _config: (_ for _ in ()).throw(AssertionError('unexpected pipeline run')),
+    )
+    monkeypatch.setattr(
+        module,
+        'run_linevul_cve_trace_pair',
+        lambda _config: (_ for _ in ()).throw(AssertionError('unexpected cve run')),
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--triplet-tsne-only',
+        ],
+    )
+
+    assert result == 0
+    assert export_calls == [(True, run_dir.resolve())]
+
+
+def test_run_linevul_triplet_tsne_runs_after_cve_trace_pair(tmp_path, monkeypatch):
+    module = load_module_from_path(
+        'test_run_linevul_triplet_tsne_after_cve',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_calls: list[bool] = []
+    export_calls: list[Path] = []
+
+    monkeypatch.setattr(
+        module,
+        'run_linevul_cve_trace_pair',
+        lambda _config: cve_calls.append(True) or 0,
+    )
+    monkeypatch.setattr(
+        module,
+        'export_linevul_triplet_tsne',
+        lambda _config, *, run_dir: export_calls.append(run_dir) or None,
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--triplet-tsne',
+        ],
+    )
+
+    assert result == 0
+    assert cve_calls == [True]
+    assert export_calls == [run_dir.resolve()]
+
+
+def test_run_linevul_triplet_tsne_requires_cve_trace_pair(tmp_path, capsys):
+    module = load_module_from_path(
+        'test_run_linevul_triplet_tsne_requires_cve',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    _write_stage07_csv(run_dir / '07_dataset_export' / 'Real_Vul_data.csv')
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--triplet-tsne',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert '--triplet-tsne requires --cve-trace-pair' in captured.err
