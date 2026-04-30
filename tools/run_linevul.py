@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shutil
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
 from shared import bench_runner as _bench_runner
 from shared import triplet_tsne as _triplet_tsne
 from shared.artifact_layout import build_dataset_export_paths
@@ -74,6 +76,7 @@ class LineVulRunConfig:
     triplet_tsne_only: bool
     overwrite: bool
     dry_run: bool
+    single_tail510_test: bool = True
 
 
 @dataclass(frozen=True)
@@ -141,6 +144,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num-train-epochs', type=int, default=DEFAULT_NUM_TRAIN_EPOCHS)
     parser.add_argument('--extended-realvul', action='store_true')
     parser.add_argument('--cve-trace-pair', action='store_true')
+    parser.add_argument(
+        '--no-single-tail510-test',
+        dest='single_tail510_test',
+        action='store_false',
+        default=True,
+        help=(
+            'For --cve-trace-pair, use the original LineVul test chunking/filtering '
+            'instead of one tail-510-token sample per source CSV row.'
+        ),
+    )
     parser.add_argument('--triplet-tsne', action='store_true')
     parser.add_argument('--triplet-tsne-only', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
@@ -165,6 +178,7 @@ def normalize_config(config: LineVulRunConfig) -> LineVulRunConfig:
         triplet_tsne_only=config.triplet_tsne_only,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
+        single_tail510_test=config.single_tail510_test,
     )
 
 
@@ -345,6 +359,52 @@ def find_latest_hidden_state_output(output_dir: Path, *, split_name: str = 'test
     return candidates[-1]
 
 
+def _count_source_test_rows(source_csv: Path) -> int:
+    csv.field_size_limit(sys.maxsize)
+    with source_csv.open('r', encoding='utf-8', newline='') as f:
+        reader = csv.DictReader(f)
+        return sum(1 for row in reader if str(row.get('dataset_type') or '').strip() == 'test')
+
+
+def _count_prediction_rows(prediction_csv: Path) -> int:
+    csv.field_size_limit(sys.maxsize)
+    with prediction_csv.open('r', encoding='utf-8', newline='') as f:
+        return sum(1 for _ in csv.DictReader(f))
+
+
+def _count_hidden_state_feature_rows(feature_npz: Path) -> int:
+    with np.load(feature_npz) as payload:
+        return int(np.asarray(payload['features']).shape[0])
+
+
+def require_cve_trace_pair_test_row_counts(paths: LineVulPaths) -> None:
+    source_csv = paths.host_dataset_csv if paths.host_dataset_csv.exists() else paths.source_csv
+    source_count = _count_source_test_rows(source_csv)
+
+    fine_npz = find_latest_hidden_state_output(paths.host_output_dir)
+    raw_npz = find_latest_hidden_state_output(paths.host_raw_test_output_dir)
+    if fine_npz is None:
+        raise RuntimeError(
+            f'Expected fine-tuned test hidden-state export not found: {paths.host_output_dir}'
+        )
+    if raw_npz is None:
+        raise RuntimeError(
+            'Expected raw-model test hidden-state export not found: '
+            f'{paths.host_raw_test_output_dir}'
+        )
+
+    counts = {
+        'source_test_rows': source_count,
+        'fine_prediction_rows': _count_prediction_rows(paths.host_test_predictions_csv),
+        'fine_feature_rows': _count_hidden_state_feature_rows(fine_npz),
+        'raw_prediction_rows': _count_prediction_rows(paths.host_raw_test_predictions_csv),
+        'raw_feature_rows': _count_hidden_state_feature_rows(raw_npz),
+    }
+    if len(set(counts.values())) != 1:
+        summary = ', '.join(f'{name}={value}' for name, value in counts.items())
+        raise RuntimeError(f'LineVul cve_trace_pair test row count mismatch: {summary}')
+
+
 def download_file(url: str, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.with_name(f'{output_path.name}.tmp')
@@ -487,6 +547,8 @@ def require_paired_test_outputs(paths: LineVulPaths) -> None:
     combined_image, combined_cache = combined_feature_artifact_paths(paths)
     require_exists(combined_image, combined_image.name)
     require_exists(combined_cache, combined_cache.name)
+    if paths.target_name == CVE_TRACE_PAIR_TARGET_NAME:
+        require_cve_trace_pair_test_row_counts(paths)
 
 
 def build_linevul_paths(
@@ -746,6 +808,8 @@ def build_line_vul_command(
 ) -> list[str]:
     if phase == 'prepare':
         phase_flags = ['--prepare_dataset']
+        if paths.target_name == CVE_TRACE_PAIR_TARGET_NAME and config.single_tail510_test:
+            phase_flags.append('--single_tail510_test')
         train_batch_size = config.eval_batch_size
         eval_batch_size = config.eval_batch_size
         output_dir = paths.container_output_dir
@@ -1140,6 +1204,7 @@ def main() -> int:
             triplet_tsne_only=args.triplet_tsne_only,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
+            single_tail510_test=args.single_tail510_test,
         )
     )
     try:

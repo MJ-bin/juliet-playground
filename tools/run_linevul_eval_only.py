@@ -218,7 +218,11 @@ def build_prepare_command(
     config: LineVulEvalOnlyConfig,
     paths: LineVulEvalOnlyPaths,
 ) -> list[str]:
-    return [*_base_command_args(config, paths), '--prepare_dataset']
+    return [
+        *_base_command_args(config, paths),
+        '--prepare_dataset',
+        '--single_tail510_test',
+    ]
 
 
 def build_test_command(

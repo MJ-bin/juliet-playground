@@ -6,6 +6,8 @@ import os
 import tarfile
 from pathlib import Path
 
+import numpy as np
+
 from tests.helpers import REPO_ROOT, load_module_from_path, run_module_main, write_text
 
 
@@ -142,6 +144,15 @@ def _write_linevul_model_dir(path: Path, *, config_text: str = '{}\n') -> Path:
     write_text(path / 'pytorch_model.bin', 'weights\n')
     write_text(path / 'training_args.bin', 'args\n')
     return path
+
+
+def _write_hidden_state_npz(path: Path, *, row_count: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        features=np.zeros((row_count, 2), dtype=np.float32),
+        labels=np.zeros((row_count,), dtype=np.int64),
+    )
 
 
 def _write_extended_realvul_csv(path: Path) -> None:
@@ -309,7 +320,53 @@ def test_run_linevul_cve_trace_pair_dry_run_prints_prepare_test_and_raw_test(
     assert '[vuln_patch/prepare]' not in captured.out
     assert '[vuln_patch/raw_test]' not in captured.out
     assert '--eval_model_name' in captured.out
+    assert '--single_tail510_test' in captured.out
     assert 'vuln_patch' not in captured.out
+
+
+def test_run_linevul_cve_trace_pair_can_disable_single_tail510_prepare(
+    tmp_path, monkeypatch, capsys
+):
+    module = load_module_from_path(
+        'test_run_linevul_cve_trace_pair_no_single_tail510',
+        REPO_ROOT / 'tools/run_linevul.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    run_dir.mkdir(parents=True, exist_ok=True)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    cve_csv = tmp_path / 'cases' / 'Real_Vul_data.csv'
+    _write_vuln_patch_csv(cve_csv)
+    monkeypatch.setattr(module, 'CVE_TRACE_PAIR_SOURCE_CSV', cve_csv)
+    _write_linevul_model_dir(
+        vpbench_root
+        / 'baseline'
+        / 'RealVul'
+        / 'Experiments'
+        / 'LineVul'
+        / 'juliet-playground'
+        / 'run-demo'
+        / 'best_model'
+    )
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--cve-trace-pair',
+            '--no-single-tail510-test',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert '[cve_trace_pair/prepare]' in captured.out
+    assert '--prepare_dataset' in captured.out
+    assert '--single_tail510_test' not in captured.out
 
 
 def test_stage_downloaded_model_archive_extracts_nested_model_dir(tmp_path):
@@ -697,18 +754,18 @@ def test_run_linevul_cve_trace_pair_reuses_primary_best_model_and_runs_prepare_t
             write_text(cve_dataset_dir / 'test_dataset.pkl', 'test\n')
         elif log_path == cve_output_dir / 'test.log':
             assert (cve_output_dir / 'best_model' / 'config.json').exists()
-            write_text(cve_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,1\n')
+            write_text(cve_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,1\n0,0\n')
             fine_npz = cve_output_dir / '20260401-000000-000000_test_last_hidden_state_vectors.npz'
             fine_image, fine_cache = module._artifact_image_and_cache(fine_npz)
-            write_text(fine_npz, 'fine npz\n')
+            _write_hidden_state_npz(fine_npz, row_count=2)
             write_text(fine_image, 'fine image\n')
             write_text(fine_cache, '{}\n')
         elif log_path == cve_output_dir / 'raw_model_test.log':
             raw_output_dir = cve_output_dir / 'raw_model_eval'
-            write_text(raw_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,0\n')
+            write_text(raw_output_dir / 'test_pred_with_code.csv', 'label,pred\n1,0\n0,1\n')
             raw_npz = raw_output_dir / '20260401-000001-000000_test_last_hidden_state_vectors.npz'
             raw_image, raw_cache = module._artifact_image_and_cache(raw_npz)
-            write_text(raw_npz, 'raw npz\n')
+            _write_hidden_state_npz(raw_npz, row_count=2)
             write_text(raw_image, 'raw image\n')
             write_text(raw_cache, '{}\n')
             write_text(combined_image, 'combined image\n')
@@ -740,6 +797,7 @@ def test_run_linevul_cve_trace_pair_reuses_primary_best_model_and_runs_prepare_t
     test_command = commands[1][0]
     raw_test_command = commands[2][0]
     assert '--prepare_dataset' in prepare_command
+    assert '--single_tail510_test' in prepare_command
     assert '--test_predict' in test_command
     assert '--test_predict' in raw_test_command
     assert '--train' not in prepare_command

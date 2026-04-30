@@ -80,6 +80,7 @@ def test_run_linevul_eval_only_dry_run_prints_prepare_and_test(tmp_path, capsys)
     assert result == 0
     captured = capsys.readouterr()
     assert '[eval_only/prepare]' in captured.out
+    assert '--single_tail510_test' in captured.out
     assert '[eval_only/test]' in captured.out
     assert '[eval_only/train]' not in captured.out
     assert '--eval_model_name' in captured.out
@@ -148,6 +149,7 @@ def test_run_linevul_eval_only_executes_prepare_and_test(tmp_path, monkeypatch):
     prepare_command = commands[0][0]
     test_command = commands[1][0]
     assert '--prepare_dataset' in prepare_command
+    assert '--single_tail510_test' in prepare_command
     assert '--test_predict' in test_command
     assert '--eval_model_name' in test_command
     assert test_command[test_command.index('--eval_model_name') + 1] == str(
