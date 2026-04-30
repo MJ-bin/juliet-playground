@@ -134,7 +134,7 @@ DelayedExecutor::DelayedExecutor(const KServiceAction &service, Solid::Device &d
 QString exec = m_service.exec();
 mx.expandMacrosShellQuote(exec);
 KRun::runCommand(exec, QString(), m_service.icon(), 0);
-",
+"
 13,13,1,"1",shadowsocks-libev__CVE-2017-15924,,,test,"r   = recvfrom(manager->fd, buf, BUF_SIZE, 0, (struct sockaddr *)&claddr, &len);
 struct server *server = get_server(buf, r);
 int ret = add_server(manager, server);
@@ -142,13 +142,13 @@ char *cmd = construct_command_line(manager, server);
 if (server->method) method = server->method;
 snprintf(cmd, BUF_SIZE, '%s -m %s --manager-address %s -f %s/.shadowsocks_%s.pid -c %s/.shadowsocks_%s.conf`', executable, method, manager->manager_address, working_dir, server->port, working_dir, server->port);
 if (system(cmd) == -1) {
-",
+"
 14,14,0,,shadowsocks-libev__CVE-2017-15924,,,test,"r   = recvfrom(manager->fd, buf, BUF_SIZE, 0, (struct sockaddr *)&claddr, &len);
 struct server *server = get_server(buf, r);
 int ret = add_server(manager, server);
 char *cmd = construct_command_line(manager, server);
 snprintf(cmd, BUF_SIZE, '%s --manager-address %s -f %s/.shadowsocks_%d.pid -c %s/.shadowsocks_%d.conf', executable, manager->manager_address, working_dir, port, working_dir, port);
-",
+"
 15,15,1,"1",openjpeg__CVE-2019-12973,,,test,"
 image = bmptoimage(parameters.infile, &parameters);
 opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
@@ -181,7 +181,7 @@ opj_tcd_band_t* OPJ_RESTRICT band = &res->bands[bandno];
 for (precno = 0; precno < res->pw * res->ph; ++precno) {
 opj_tcd_precinct_t *prc = &band->precincts[precno];
 for (cblkno = 0; cblkno < prc->cw * prc->ch; ++cblkno) {
-",
+"
 16,16,0,,openjpeg__CVE-2019-12973,,,test,"
 image = bmptoimage(parameters.infile, &parameters);
 opj_image_t* bmptoimage(const char *filename, opj_cparameters_t *parameters)
@@ -199,7 +199,7 @@ c1 = (OPJ_UINT8)c1_int;
 *pix = c1;
 written++;
 if (written != width * height) { return OPJ_FALSE; }
-",
+"
 17,17,1,"1",radare2__CVE-2019-16718,,,test,"
 RList *symbols = r_bin_get_symbols (r->bin);
 r_list_foreach (symbols, iter, symbol) {
@@ -239,7 +239,7 @@ R_API int r_sys_cmd(const char *str) {
 return r_sandbox_system (str, 1);
 R_API int r_sandbox_system (const char *x, int n) {
 return system (x);
-",
+"
 18,18,0,,radare2__CVE-2019-16718,,,test,"
 RList *symbols = r_bin_get_symbols (r->bin);
 r_list_foreach (symbols, iter, symbol) {
@@ -248,7 +248,7 @@ char *module = strdup (r_symbol_name);
 char *p = strstr (module, "".dll_"");
 char *symname = __filterShell (p + 5);
 r_cons_printf (""\""k bin/pe/%s/%d=%s.%s\""\n"",module, symbol->ordinal, r->bin->prefix, symname);
-",
+"
 19,19,1,"1",ghostpdl__CVE-2018-16863,,,test,"
 int gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
 gx_device_printer * const ppdev = (gx_device_printer *)pdev;
@@ -269,7 +269,7 @@ pfn->fname = pdelim;
 code = parsed.iodev->procs.gp_fopen(parsed.iodev, parsed.fname, fmode, pfile, NULL, 0);
 static int pipe_fopen(gx_io_device * iodev, const char *fname, const char *access, FILE ** pfile, char *rfname, uint rnamelen)
 *pfile = popen((char *)fname, (char *)access);
-",
+"
 20,20,0,,ghostpdl__CVE-2018-16863,,,test,"
 saveLockSafety = gs_currentdevice_inline(pgs)->LockSafetyParams;
 if ((code = gs_setdevice_no_erase(pgs, ndev)) < 0)
