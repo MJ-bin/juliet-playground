@@ -220,6 +220,90 @@ def test_run_pdbert_uses_latest_run_in_dry_run_mode(tmp_path, capsys):
     assert '[vuln_patch/raw_analyze]' in captured.out
 
 
+def test_run_pdbert_dry_run_prints_code_truncation_side(tmp_path, capsys):
+    module = load_module_from_path(
+        'test_run_pdbert_truncation_side_dry_run',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    run_dir = tmp_path / 'pipeline-runs' / 'run-demo'
+    source_csv = run_dir / '07_dataset_export' / 'Real_Vul_data.csv'
+    _write_stage07_csv(source_csv)
+    vpbench_root = _make_vpbench_root(tmp_path / 'VP-Bench')
+    raw_model_dir = _make_raw_model_archive_dir(tmp_path / 'raw-model')
+
+    result = run_module_main(
+        module,
+        [
+            '--run-dir',
+            str(run_dir),
+            '--vpbench-root',
+            str(vpbench_root),
+            '--raw-model-dir',
+            str(raw_model_dir),
+            '--code-truncation-side',
+            'tail',
+            '--dry-run',
+        ],
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert 'PDBERT code truncation side: tail' in captured.out
+
+
+def test_write_runtime_config_injects_code_truncation_side(tmp_path):
+    module = load_module_from_path(
+        'test_run_pdbert_runtime_truncation_side',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    template = tmp_path / 'pdbert.jsonnet'
+    output = tmp_path / 'runtime.jsonnet'
+    write_text(
+        template,
+        "local data_base_path = '/old/';\n"
+        '{\n'
+        '    dataset_reader: {\n'
+        '        type: "func_vul_detect_base",\n'
+        '    },\n'
+        '}\n',
+    )
+
+    module.write_runtime_config(
+        template,
+        output,
+        Path('/new/data'),
+        code_truncation_side='tail',
+    )
+
+    text = output.read_text(encoding='utf-8')
+    assert "local data_base_path = '/new/data/';" in text
+    assert 'code_truncation_side: "tail",' in text
+
+
+def test_rewrite_model_config_file_sets_code_truncation_side(tmp_path):
+    module = load_module_from_path(
+        'test_run_pdbert_model_config_truncation_side',
+        REPO_ROOT / 'tools/run_pdbert.py',
+    )
+
+    config_path = tmp_path / 'config.json'
+    write_json(
+        config_path,
+        {
+            'dataset_reader': {'type': 'func_vul_detect_base'},
+            'model': {'type': 'vul_func_predictor'},
+        },
+    )
+
+    module.rewrite_model_config_file_code_truncation_side(config_path, 'tail')
+
+    with config_path.open(encoding='utf-8') as f:
+        payload = json.load(f)
+    assert payload['dataset_reader']['code_truncation_side'] == 'tail'
+
+
 def test_run_pdbert_stages_csv_configs_and_runs_primary_pipeline(tmp_path, monkeypatch):
     module = load_module_from_path('test_run_pdbert_execute', REPO_ROOT / 'tools/run_pdbert.py')
 

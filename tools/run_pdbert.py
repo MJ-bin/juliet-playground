@@ -29,6 +29,8 @@ DEFAULT_RAW_MODEL_DIR = Path('../VP-Bench/downloads/PDBERT/data/models/pdbert-ba
 DEFAULT_METRIC_AVERAGE = 'binary'
 DEFAULT_ANALYZE_BATCH_SIZE = 32
 DEFAULT_CUDA_DEVICE = 0
+DEFAULT_CODE_TRUNCATION_SIDE = 'head'
+CODE_TRUNCATION_SIDES = ('head', 'tail')
 PRIMARY_TARGET_NAME = 'primary'
 VULN_PATCH_TARGET_NAME = 'vuln_patch'
 EXTENDED_REALVUL_TARGET_NAME = EXTENDED_REALVUL_NAMESPACE
@@ -81,6 +83,7 @@ class PDBERTRunConfig:
     triplet_tsne_only: bool
     overwrite: bool
     dry_run: bool
+    code_truncation_side: str = DEFAULT_CODE_TRUNCATION_SIDE
 
 
 @dataclass(frozen=True)
@@ -174,6 +177,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--cve-trace-pair', action='store_true')
     parser.add_argument('--triplet-tsne', action='store_true')
     parser.add_argument('--triplet-tsne-only', action='store_true')
+    parser.add_argument(
+        '--code-truncation-side',
+        choices=CODE_TRUNCATION_SIDES,
+        default=DEFAULT_CODE_TRUNCATION_SIDE,
+        help=(
+            'Select which side of over-length code samples to keep for PDBERT. '
+            'The default preserves the historical head truncation behavior.'
+        ),
+    )
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     return parser.parse_args()
@@ -192,6 +204,7 @@ def normalize_config(config: PDBERTRunConfig) -> PDBERTRunConfig:
         triplet_tsne_only=config.triplet_tsne_only,
         overwrite=config.overwrite,
         dry_run=config.dry_run,
+        code_truncation_side=config.code_truncation_side,
     )
 
 
@@ -202,6 +215,8 @@ def validate_config(config: PDBERTRunConfig) -> None:
         raise ValueError('--cve-trace-pair cannot be used with --extended-realvul')
     if config.triplet_tsne and config.triplet_tsne_only:
         raise ValueError('--triplet-tsne and --triplet-tsne-only cannot be used together')
+    if config.code_truncation_side not in CODE_TRUNCATION_SIDES:
+        raise ValueError(f'Unsupported PDBERT code truncation side: {config.code_truncation_side}')
     if config.extended_realvul and (config.triplet_tsne or config.triplet_tsne_only):
         raise ValueError(
             '--triplet-tsne and --triplet-tsne-only are not supported with --extended-realvul'
@@ -572,15 +587,52 @@ def load_archive_config_json(model_archive: Path) -> dict[str, Any]:
         return json.loads(extracted.read().decode('utf-8'))
 
 
+def apply_code_truncation_side_to_model_config(
+    config_dict: dict[str, Any],
+    code_truncation_side: str,
+) -> dict[str, Any]:
+    rewritten = json.loads(json.dumps(config_dict))
+    dataset_reader = rewritten.get('dataset_reader')
+    if isinstance(dataset_reader, dict):
+        dataset_reader['code_truncation_side'] = code_truncation_side
+    return rewritten
+
+
+def rewrite_model_config_file_code_truncation_side(
+    config_path: Path,
+    code_truncation_side: str,
+) -> None:
+    if not config_path.exists():
+        return
+    with config_path.open(encoding='utf-8') as f:
+        config_dict = json.load(f)
+    rewritten = apply_code_truncation_side_to_model_config(
+        config_dict,
+        code_truncation_side,
+    )
+    if config_path.is_symlink():
+        config_path.unlink()
+    config_path.write_text(
+        json.dumps(rewritten, ensure_ascii=False, indent=4) + '\n',
+        encoding='utf-8',
+    )
+
+
 def rewrite_model_config_for_eval(
     config_dict: dict[str, Any],
     *,
     container_dataset_dir: Path,
     container_output_dir: Path,
+    code_truncation_side: str | None = None,
 ) -> dict[str, Any]:
     rewritten = json.loads(json.dumps(config_dict))
     rewritten['train_data_path'] = str(container_dataset_dir / 'train.json')
     rewritten['validation_data_path'] = str(container_dataset_dir / 'validate.json')
+    if code_truncation_side is not None:
+        rewritten = apply_code_truncation_side_to_model_config(
+            rewritten,
+            code_truncation_side,
+        )
 
     trainer = rewritten.get('trainer')
     if isinstance(trainer, dict):
@@ -602,6 +654,7 @@ def stage_downloaded_model_artifacts(
     *,
     container_dataset_dir: Path,
     container_output_dir: Path,
+    code_truncation_side: str,
 ) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     model_archive = model_dir / 'model.tar.gz'
@@ -635,6 +688,7 @@ def stage_downloaded_model_artifacts(
         config_dict,
         container_dataset_dir=container_dataset_dir,
         container_output_dir=container_output_dir,
+        code_truncation_side=code_truncation_side,
     )
     model_config_json.write_text(
         json.dumps(rewritten_config, ensure_ascii=False, indent=4) + '\n',
@@ -753,25 +807,56 @@ def _rewrite_data_base_path(template_text: str, data_base_path: Path) -> str:
     return rewritten
 
 
-def write_runtime_config(template_path: Path, output_path: Path, data_base_path: Path) -> None:
+def _rewrite_code_truncation_side(template_text: str, code_truncation_side: str) -> str:
+    replacement = f'code_truncation_side: "{code_truncation_side}",'
+    rewritten, count = re.subn(
+        r'code_truncation_side:\s*"[^\"]*"\s*,',
+        replacement,
+        template_text,
+        count=1,
+    )
+    if count == 1:
+        return rewritten
+
+    rewritten, count = re.subn(
+        r'(dataset_reader:\s*\{\n)',
+        rf'\1        {replacement}\n',
+        template_text,
+        count=1,
+    )
+    return rewritten if count == 1 else template_text
+
+
+def write_runtime_config(
+    template_path: Path,
+    output_path: Path,
+    data_base_path: Path,
+    *,
+    code_truncation_side: str | None = None,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     template_text = template_path.read_text(encoding='utf-8')
+    rewritten = _rewrite_data_base_path(template_text, data_base_path)
+    if code_truncation_side is not None:
+        rewritten = _rewrite_code_truncation_side(rewritten, code_truncation_side)
     output_path.write_text(
-        _rewrite_data_base_path(template_text, data_base_path),
+        rewritten,
         encoding='utf-8',
     )
 
 
-def stage_runtime_configs(paths: PDBERTPaths) -> None:
+def stage_runtime_configs(paths: PDBERTPaths, *, code_truncation_side: str) -> None:
     write_runtime_config(
         paths.host_train_config_template,
         paths.host_runtime_train_config,
         paths.container_dataset_dir,
+        code_truncation_side=code_truncation_side,
     )
     write_runtime_config(
         paths.host_test_config_template,
         paths.host_runtime_test_config,
         paths.container_dataset_dir,
+        code_truncation_side=code_truncation_side,
     )
 
 
@@ -812,7 +897,12 @@ def require_pretrained_model_artifacts(model_dir: Path, *, label: str) -> None:
         )
 
 
-def stage_model_artifacts(source_dir: Path, target_dir: Path) -> None:
+def stage_model_artifacts(
+    source_dir: Path,
+    target_dir: Path,
+    *,
+    code_truncation_side: str | None = None,
+) -> None:
     require_model_artifacts(source_dir, label=str(source_dir))
     target_dir.mkdir(parents=True, exist_ok=True)
     for artifact_name in MODEL_ARTIFACT_NAMES:
@@ -820,14 +910,37 @@ def stage_model_artifacts(source_dir: Path, target_dir: Path) -> None:
         if not source_path.exists() and not source_path.is_symlink():
             continue
         _copy_or_symlink_path(source_path, target_dir / artifact_name)
+    if code_truncation_side is not None:
+        rewrite_model_config_file_code_truncation_side(
+            target_dir / 'config.json',
+            code_truncation_side,
+        )
 
 
-def stage_reused_model_artifacts(source_paths: PDBERTPaths, target_paths: PDBERTPaths) -> None:
-    stage_model_artifacts(source_paths.host_output_dir, target_paths.host_output_dir)
+def stage_reused_model_artifacts(
+    source_paths: PDBERTPaths,
+    target_paths: PDBERTPaths,
+    *,
+    code_truncation_side: str,
+) -> None:
+    stage_model_artifacts(
+        source_paths.host_output_dir,
+        target_paths.host_output_dir,
+        code_truncation_side=code_truncation_side,
+    )
 
 
-def stage_raw_model_artifacts(raw_model_dir: Path, target_paths: PDBERTPaths) -> None:
-    stage_model_artifacts(raw_model_dir, target_paths.host_raw_model_dir)
+def stage_raw_model_artifacts(
+    raw_model_dir: Path,
+    target_paths: PDBERTPaths,
+    *,
+    code_truncation_side: str,
+) -> None:
+    stage_model_artifacts(
+        raw_model_dir,
+        target_paths.host_raw_model_dir,
+        code_truncation_side=code_truncation_side,
+    )
 
 
 def stage_pretrained_backbone_artifacts_to_dir(raw_model_dir: Path, target_dir: Path) -> Path:
@@ -1148,6 +1261,7 @@ def print_planned_commands(
     if config.raw_model_dir is not None:
         print(f'Raw model source dir: {config.raw_model_dir}')
         print(f'Raw model source type: {raw_model_source_type}')
+    print(f'PDBERT code truncation side: {config.code_truncation_side}')
     for paths in paths_list:
         print(f'Target [{paths.target_name}] Stage 07 CSV: {paths.source_csv}')
         print(f'Target [{paths.target_name}] Host dataset dir: {paths.host_dataset_dir}')
@@ -1391,13 +1505,18 @@ def _prepare_main_model_for_target(
     if _target_uses_reused_model(paths.target_name):
         if primary_paths is None:
             raise RuntimeError('Primary PDBERT outputs are required for reused-model targets.')
-        stage_reused_model_artifacts(primary_paths, paths)
+        stage_reused_model_artifacts(
+            primary_paths,
+            paths,
+            code_truncation_side=config.code_truncation_side,
+        )
     elif _target_uses_downloaded_model(paths.target_name):
         stage_downloaded_model_artifacts(
             EXTENDED_REALVUL_MODEL_URL,
             paths.host_output_dir,
             container_dataset_dir=paths.container_dataset_dir,
             container_output_dir=paths.container_output_dir,
+            code_truncation_side=config.code_truncation_side,
         )
     else:
         return
@@ -1413,7 +1532,11 @@ def _prepare_raw_model_for_target(
     if config.raw_model_dir is None:
         raise RuntimeError('Raw PDBERT model dir is required for raw-model evaluation.')
     if raw_model_source_type == RAW_MODEL_SOURCE_ARCHIVE:
-        stage_raw_model_artifacts(config.raw_model_dir, paths)
+        stage_raw_model_artifacts(
+            config.raw_model_dir,
+            paths,
+            code_truncation_side=config.code_truncation_side,
+        )
     elif raw_model_source_type == RAW_MODEL_SOURCE_PRETRAINED_BACKBONE:
         stage_pretrained_backbone_artifacts(config.raw_model_dir, paths)
         copy_raw_baseline_script_to_container(paths, config.container_name)
@@ -1421,6 +1544,10 @@ def _prepare_raw_model_for_target(
         run_logged_command(
             build_raw_baseline_command(config, paths),
             raw_model_setup_log_path(paths),
+        )
+        rewrite_model_config_file_code_truncation_side(
+            paths.host_raw_model_config_json,
+            config.code_truncation_side,
         )
     else:
         raise RuntimeError(f'Unsupported raw model source type: {raw_model_source_type}')
@@ -1548,7 +1675,10 @@ def run_pdbert_cve_trace_pair(config: PDBERTRunConfig) -> int:
         cleanup_output_targets([cve_trace_pair_paths], container_name=config.container_name)
 
     stage_source_csv(cve_trace_pair_paths)
-    stage_runtime_configs(cve_trace_pair_paths)
+    stage_runtime_configs(
+        cve_trace_pair_paths,
+        code_truncation_side=config.code_truncation_side,
+    )
     _run_target_pipeline(
         config,
         commands,
@@ -1602,7 +1732,7 @@ def run_pdbert_from_pipeline(config: PDBERTRunConfig) -> int:
         cleanup_output_targets(paths_list, container_name=config.container_name)
     for paths in paths_list:
         stage_source_csv(paths)
-        stage_runtime_configs(paths)
+        stage_runtime_configs(paths, code_truncation_side=config.code_truncation_side)
 
     for paths in paths_list:
         _run_target_pipeline(
@@ -1632,6 +1762,7 @@ def main() -> int:
             triplet_tsne_only=args.triplet_tsne_only,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
+            code_truncation_side=args.code_truncation_side,
         )
     )
     try:
